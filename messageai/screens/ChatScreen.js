@@ -13,15 +13,23 @@ import {
   Platform,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useNetwork } from '../context/NetworkContext';
+import { useNotifications } from '../context/NotificationContext';
 import {
   createOrGetChat,
   sendMessage,
   subscribeToMessages,
   subscribeToUsers,
+  markMessagesAsRead,
 } from '../utils/firestore';
+import { subscribeToMultiplePresence, getPresenceText, isUserOnline } from '../utils/presence';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 export default function ChatScreen({ route, navigation }) {
   const { user } = useAuth();
+  const { isOffline } = useNetwork();
+  const { setActiveChatId } = useNotifications();
   const [chatId, setChatId] = useState(route?.params?.chatId ?? null);
   const [chatMembers, setChatMembers] = useState(route?.params?.members ?? []);
   const [chatMetadata, setChatMetadata] = useState(route?.params?.metadata ?? {});
@@ -30,6 +38,7 @@ export default function ChatScreen({ route, navigation }) {
   const [loading, setLoading] = useState(!route?.params?.chatId);
   const flatListRef = useRef(null);
   const [userProfiles, setUserProfiles] = useState([]);
+  const [presenceData, setPresenceData] = useState({});
 
   // Initialize chat based on navigation params or fallback to personal chat
   useEffect(() => {
@@ -54,6 +63,20 @@ export default function ChatScreen({ route, navigation }) {
     }
   }, [route?.params?.metadata]);
 
+  // Set this chat as active to prevent notifications
+  useEffect(() => {
+    if (chatId) {
+      setActiveChatId(chatId);
+      console.log('📵 Notifications disabled for chat:', chatId);
+    }
+    
+    // Clear active chat when leaving
+    return () => {
+      setActiveChatId(null);
+      console.log('🔔 Notifications re-enabled');
+    };
+  }, [chatId, setActiveChatId]);
+
   // Subscribe to messages when chatId is available
   useEffect(() => {
     if (!chatId) return;
@@ -65,10 +88,22 @@ export default function ChatScreen({ route, navigation }) {
       // Scroll to bottom when new messages arrive
       setLoading(false);
       setTimeout(() => scrollToBottom(), 100);
+      
+      // Mark unread messages as read
+      if (user?.uid) {
+        const unreadMessages = msgs.filter(
+          msg => msg.senderId !== user.uid && !(msg.readBy || []).includes(user.uid)
+        );
+        
+        if (unreadMessages.length > 0) {
+          const unreadIds = unreadMessages.map(msg => msg.id);
+          markMessagesAsRead(chatId, unreadIds, user.uid);
+        }
+      }
     });
 
     return () => unsubscribe();
-  }, [chatId]);
+  }, [chatId, user?.uid]);
 
   useEffect(() => {
     const unsubscribe = subscribeToUsers((profiles) => {
@@ -81,6 +116,44 @@ export default function ChatScreen({ route, navigation }) {
       }
     };
   }, []);
+
+  // Subscribe to presence for chat members
+  useEffect(() => {
+    if (!chatMembers || chatMembers.length === 0) return;
+
+    const otherMembers = chatMembers.filter((id) => id !== user?.uid);
+    if (otherMembers.length === 0) return;
+
+    const unsubscribe = subscribeToMultiplePresence(otherMembers, (data) => {
+      setPresenceData(data);
+    });
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [chatMembers, user?.uid]);
+
+  // Subscribe to chat metadata changes (name, icon, notes)
+  useEffect(() => {
+    if (!chatId) return;
+
+    const chatRef = doc(db, 'chats', chatId);
+    const unsubscribe = onSnapshot(chatRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setChatMetadata((prev) => ({
+          ...prev,
+          name: data.name,
+          icon: data.icon,
+          notes: data.notes,
+        }));
+      }
+    });
+
+    return () => unsubscribe();
+  }, [chatId]);
 
   // Scroll to bottom when messages change
   const scrollToBottom = () => {
@@ -124,12 +197,17 @@ export default function ChatScreen({ route, navigation }) {
     const messageText = newMessage.trim();
     const tempId = `temp-${Date.now()}`;
 
+    // Get current user's profile for nickname
+    const currentUserProfile = userProfiles.find(p => p.id === user.uid);
+    const senderName = currentUserProfile?.displayName || currentUserProfile?.nickname || user.email?.split('@')[0] || 'User';
+
     // Optimistic UI update - add message immediately
     const optimisticMessage = {
       id: tempId,
       text: messageText,
       senderId: user.uid,
       senderEmail: user.email,
+      senderName,
       timestamp: { toDate: () => new Date() }, // Temporary timestamp
       sending: true, // Flag to show sending state
     };
@@ -139,7 +217,7 @@ export default function ChatScreen({ route, navigation }) {
     scrollToBottom();
 
     try {
-      await sendMessage(chatId, user.uid, user.email, messageText);
+      await sendMessage(chatId, user.uid, user.email, messageText, senderName);
       // Message will be updated by real-time listener
     } catch (error) {
       console.error('Error sending message:', error);
@@ -173,10 +251,14 @@ export default function ChatScreen({ route, navigation }) {
   }, [chatMetadata?.memberDisplayNames, chatMembers]);
 
   const getDisplayName = (memberId, fallbackEmail) => {
+    // Don't show current user's name
+    if (memberId === user?.uid) return null;
+    
     const metaName = metadataNameMap[memberId];
     if (metaName) return metaName;
     const profile = userProfileMap[memberId];
     if (profile?.displayName) return profile.displayName;
+    if (profile?.nickname) return profile.nickname;
     if (profile?.email) return profile.email;
     if (fallbackEmail) return fallbackEmail;
     return memberId;
@@ -186,9 +268,40 @@ export default function ChatScreen({ route, navigation }) {
     if (!chatMembers?.length) return 'Chat';
     const others = chatMembers.filter((id) => id !== user?.uid);
     if (others.length === 0) return 'Personal Notes';
-    const names = others.map((id) => getDisplayName(id));
-    return names.join(', ');
-  }, [chatMembers, metadataNameMap, userProfileMap, user?.uid]);
+    
+    // For 1-on-1 chats (2 members), always use the other user's name
+    if (chatMembers.length === 2) {
+      const names = others.map((id) => getDisplayName(id)).filter(Boolean);
+      return names.length > 0 ? names[0] : 'Chat';
+    }
+    
+    // For group chats (3+ members), use custom name if available
+    if (chatMetadata?.name) {
+      return chatMetadata.name;
+    }
+    
+    // Fallback to dynamic name generation for groups
+    const names = others.map((id) => getDisplayName(id)).filter(Boolean);
+    return names.length > 0 ? names.join(' & ') : 'Chat';
+  }, [chatMembers, chatMetadata?.name, metadataNameMap, userProfileMap, user?.uid]);
+
+  const chatPresenceText = useMemo(() => {
+    if (!chatMembers?.length) return '';
+    const others = chatMembers.filter((id) => id !== user?.uid);
+    if (others.length === 0) return '';
+    
+    // For 1-on-1 chats, show the user's presence
+    if (others.length === 1) {
+      const presence = presenceData[others[0]];
+      return getPresenceText(presence);
+    }
+    
+    // For group chats, show count of online members
+    const onlineCount = others.filter((id) => isUserOnline(presenceData[id])).length;
+    if (onlineCount === 0) return '';
+    if (onlineCount === others.length) return 'All members online';
+    return `${onlineCount} online`;
+  }, [chatMembers, presenceData, user?.uid]);
 
   const formatTime = (timestamp) => {
     if (!timestamp?.toDate) return '';
@@ -204,6 +317,28 @@ export default function ChatScreen({ route, navigation }) {
     const isMyMessage = item.senderId === user.uid;
     const senderName = getDisplayName(item.senderId, item.senderEmail);
 
+    // Calculate read status for sender's messages
+    let readIndicator = '';
+    if (isMyMessage && !item.sending) {
+      const readBy = item.readBy || [];
+      const otherMembers = (chatMembers || []).filter(id => id !== user.uid);
+      const readByOthers = readBy.filter(id => id !== user.uid);
+      
+      if (otherMembers.length === 0) {
+        // Personal chat with self - always read
+        readIndicator = '✓✓';
+      } else if (readByOthers.length === 0) {
+        // Not read by anyone yet - single checkmark (sent)
+        readIndicator = '✓';
+      } else if (readByOthers.length === otherMembers.length) {
+        // Read by ALL other members - double checkmark
+        readIndicator = '✓✓';
+      } else {
+        // Read by some but not all - single checkmark
+        readIndicator = '✓';
+      }
+    }
+
     return (
       <View
         style={[
@@ -218,7 +353,7 @@ export default function ChatScreen({ route, navigation }) {
             item.sending && styles.sendingMessage,
           ]}
         >
-          {!isMyMessage && (
+          {!isMyMessage && chatMembers && chatMembers.length > 2 && (
             <Text style={styles.senderName}>{senderName}</Text>
           )}
           <Text
@@ -229,14 +364,26 @@ export default function ChatScreen({ route, navigation }) {
           >
             {item.text}
           </Text>
-          <Text
-            style={[
-              styles.timeText,
-              isMyMessage ? styles.myTimeText : styles.theirTimeText,
-            ]}
-          >
-            {formatTime(item.timestamp)} {item.sending && '●'}
-          </Text>
+          <View style={styles.messageFooter}>
+            <Text
+              style={[
+                styles.timeText,
+                isMyMessage ? styles.myTimeText : styles.theirTimeText,
+              ]}
+            >
+              {formatTime(item.timestamp)}
+            </Text>
+            {isMyMessage && (
+              <Text
+                style={[
+                  styles.readIndicator,
+                  isMyMessage ? styles.myTimeText : styles.theirTimeText,
+                ]}
+              >
+                {item.sending ? '○' : readIndicator}
+              </Text>
+            )}
+          </View>
         </View>
       </View>
     );
@@ -255,11 +402,37 @@ export default function ChatScreen({ route, navigation }) {
             </TouchableOpacity>
           )}
         </View>
-        <View style={styles.headerTitleWrapper}>
+        <TouchableOpacity 
+          style={styles.headerTitleWrapper}
+          onPress={() => {
+            // Only allow settings for group chats (3+ members)
+            if (chatId && chatMembers && chatMembers.length >= 3) {
+              navigation.navigate('ChatSettings', {
+                chatId,
+                chatData: {
+                  name: chatMetadata?.name || chatTitle,
+                  icon: chatMetadata?.icon,
+                  notes: chatMetadata?.notes,
+                  members: chatMembers,
+                },
+              });
+            }
+          }}
+          disabled={!chatMembers || chatMembers.length < 3}
+        >
           <Text style={styles.title}>{chatTitle}</Text>
-        </View>
+          {chatPresenceText && (
+            <Text style={styles.presenceText}>{chatPresenceText}</Text>
+          )}
+        </TouchableOpacity>
         <View style={styles.headerSide} />
       </View>
+
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>📵 Offline - Messages will send when reconnected</Text>
+        </View>
+      )}
 
       <KeyboardAvoidingView
         style={styles.content}
@@ -325,10 +498,26 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
+  offlineBanner: {
+    backgroundColor: '#FFA500',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  offlineText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#000',
+  },
+  presenceText: {
+    fontSize: 13,
+    color: '#34C759',
+    marginTop: 2,
   },
   headerSide: {
     width: 72,
@@ -407,15 +596,25 @@ const styles = StyleSheet.create({
   theirMessageText: {
     color: '#000',
   },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    gap: 4,
+  },
   timeText: {
     fontSize: 11,
-    marginTop: 4,
   },
   myTimeText: {
     color: 'rgba(255, 255, 255, 0.7)',
   },
   theirTimeText: {
     color: '#666',
+  },
+  readIndicator: {
+    fontSize: 11,
+    fontWeight: '600',
   },
   inputContainer: {
     flexDirection: 'row',

@@ -1,4 +1,7 @@
 {
+  "database": {
+    "rules": "database.rules.json"
+  },
   "firestore": {
     "database": "(default)",
     "location": "nam5",
@@ -30,8 +33,11 @@
     "firestore": {
       "port": 8080
     },
+    "database": {
+      "port": 9000
+    },
     "hosting": {
-      "port": 5002
+      "port": 5003
     },
     "ui": {
       "enabled": true

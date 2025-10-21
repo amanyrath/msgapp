@@ -1,25 +1,57 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
+  SafeAreaView,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { createUserProfile } from '../utils/firestore';
+import { setUserOnline } from '../utils/presence';
 
-export default function SignupScreen({ navigation }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+export default function ProfileScreen({ navigation }) {
+  const { user, signOut } = useAuth();
   const [nickname, setNickname] = useState('');
   const [icon, setIcon] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const { signUp } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    loadProfile();
+  }, [user?.uid]);
+
+  const loadProfile = async () => {
+    if (!user?.uid) return;
+
+    try {
+      setLoading(true);
+      const userRef = doc(db, 'users', user.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        setNickname(userData.nickname || userData.displayName || user.email?.split('@')[0] || '');
+        setIcon(userData.icon || '👤');
+      } else {
+        // Set defaults for users without profiles
+        setNickname(user.email?.split('@')[0] || '');
+        setIcon('👤');
+      }
+    } catch (error) {
+      console.error('Error loading profile:', error);
+      Alert.alert('Error', 'Failed to load profile: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const getRandomEmoji = () => {
     const emojis = [
@@ -141,23 +173,8 @@ export default function SignupScreen({ navigation }) {
     setIcon(randomEmoji);
   };
 
-  const handleSignup = async () => {
+  const handleSave = async () => {
     // Validation
-    if (!email || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
-      return;
-    }
-
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
-      return;
-    }
-
     if (!nickname || nickname.trim().length === 0) {
       Alert.alert('Error', 'Please enter a nickname');
       return;
@@ -173,113 +190,159 @@ export default function SignupScreen({ navigation }) {
       return;
     }
 
-    setIsLoading(true);
-    const result = await signUp(email, password, nickname.trim(), icon.trim());
-    setIsLoading(false);
+    try {
+      setSaving(true);
+      
+      await createUserProfile(user.uid, {
+        email: user.email,
+        displayName: nickname.trim(),
+        nickname: nickname.trim(),
+        icon: icon.trim(),
+      });
 
-    if (!result.success) {
-      Alert.alert('Sign Up Failed', result.error);
+      // Update presence with new profile data
+      try {
+        await setUserOnline(user.uid, {
+          email: user.email,
+          displayName: nickname.trim(),
+          nickname: nickname.trim(),
+          icon: icon.trim(),
+        });
+      } catch (presenceError) {
+        console.log('Could not update presence:', presenceError.message);
+      }
+
+      Alert.alert(
+        'Success',
+        'Profile updated! Your new nickname and icon will be visible immediately.',
+        [
+          {
+            text: 'OK',
+            onPress: () => navigation.goBack(),
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      Alert.alert('Error', 'Failed to save profile: ' + error.message);
+    } finally {
+      setSaving(false);
     }
-    // If successful, onAuthStateChanged will automatically navigate to chat
   };
 
+  const handleSignOut = async () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            await signOut();
+          },
+        },
+      ]
+    );
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
-      <View style={styles.content}>
-        <Text style={styles.title}>MessageAI</Text>
-        <Text style={styles.subtitle}>Create your account</Text>
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Text style={styles.backText}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.title}>Profile</Text>
+          <View style={styles.headerSpacer} />
+        </View>
 
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoComplete="email"
-            editable={!isLoading}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Nickname"
-            value={nickname}
-            onChangeText={setNickname}
-            autoCapitalize="words"
-            maxLength={20}
-            editable={!isLoading}
-          />
-
-          <View style={styles.inputRow}>
-            <TextInput
-              style={[styles.input, styles.inputWithButton]}
-              placeholder="Icon (emoji, e.g., 😊 or 🚀)"
-              value={icon}
-              onChangeText={setIcon}
-              maxLength={2}
-              editable={!isLoading}
-            />
-            <TouchableOpacity
-              style={styles.randomButton}
-              onPress={handleRandomEmoji}
-              disabled={isLoading}
-            >
-              <Text style={styles.randomButtonText}>🎲</Text>
-            </TouchableOpacity>
+        <View style={styles.content}>
+          <View style={styles.avatarContainer}>
+            <View style={styles.avatarCircle}>
+              <Text style={styles.avatarIcon}>{icon}</Text>
+            </View>
           </View>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoComplete="off"
-            textContentType="none"
-            passwordRules=""
-            editable={!isLoading}
-          />
+          <View style={styles.infoSection}>
+            <Text style={styles.label}>Email</Text>
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>{user?.email}</Text>
+            </View>
+          </View>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Confirm Password"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-            autoComplete="off"
-            textContentType="none"
-            passwordRules=""
-            editable={!isLoading}
-          />
+          <View style={styles.section}>
+            <Text style={styles.label}>Nickname</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter your nickname"
+              value={nickname}
+              onChangeText={setNickname}
+              autoCapitalize="words"
+              maxLength={20}
+              editable={!saving}
+            />
+            <Text style={styles.hint}>This is how others will see you (max 20 characters)</Text>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Icon</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={[styles.input, styles.inputWithButton]}
+                placeholder="Enter an emoji (e.g., 😊 or 🚀)"
+                value={icon}
+                onChangeText={setIcon}
+                maxLength={2}
+                editable={!saving}
+              />
+              <TouchableOpacity
+                style={styles.randomButton}
+                onPress={handleRandomEmoji}
+                disabled={saving}
+              >
+                <Text style={styles.randomButtonText}>🎲</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.hint}>Your personal emoji avatar (or tap 🎲 for random)</Text>
+          </View>
 
           <TouchableOpacity
-            style={[styles.button, styles.primaryButton]}
-            onPress={handleSignup}
-            disabled={isLoading}
+            style={[styles.button, styles.saveButton, saving && styles.buttonDisabled]}
+            onPress={handleSave}
+            disabled={saving}
           >
-            {isLoading ? (
+            {saving ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Sign Up</Text>
+              <Text style={styles.buttonText}>Save Changes</Text>
             )}
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.button, styles.secondaryButton]}
-            onPress={() => navigation.navigate('Login')}
-            disabled={isLoading}
+            style={[styles.button, styles.signOutButton]}
+            onPress={handleSignOut}
+            disabled={saving}
           >
-            <Text style={styles.secondaryButtonText}>
-              Already have an account? Log In
-            </Text>
+            <Text style={styles.signOutButtonText}>Sign Out</Text>
           </TouchableOpacity>
         </View>
-      </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -288,45 +351,102 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
-  content: {
+  keyboardView: {
+    flex: 1,
+  },
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
-    padding: 20,
+    alignItems: 'center',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F1F1',
+  },
+  backButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  backText: {
+    color: '#007AFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   title: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 10,
-    color: '#333',
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111',
   },
-  subtitle: {
-    fontSize: 18,
-    textAlign: 'center',
-    marginBottom: 40,
+  headerSpacer: {
+    width: 70,
+  },
+  content: {
+    flex: 1,
+    padding: 20,
+  },
+  avatarContainer: {
+    alignItems: 'center',
+    marginVertical: 30,
+  },
+  avatarCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  avatarIcon: {
+    fontSize: 48,
+  },
+  infoSection: {
+    marginBottom: 20,
+  },
+  section: {
+    marginBottom: 24,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111',
+    marginBottom: 8,
+  },
+  infoBox: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: 10,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  infoText: {
+    fontSize: 16,
     color: '#666',
   },
-  form: {
-    width: '100%',
-  },
   input: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F5F5F5',
     borderRadius: 10,
     padding: 15,
     fontSize: 16,
-    marginBottom: 15,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#E0E0E0',
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 15,
   },
   inputWithButton: {
     flex: 1,
-    marginBottom: 0,
   },
   randomButton: {
     width: 50,
@@ -339,27 +459,38 @@ const styles = StyleSheet.create({
   randomButtonText: {
     fontSize: 24,
   },
+  hint: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 6,
+    marginLeft: 4,
+  },
   button: {
     borderRadius: 10,
     padding: 15,
     alignItems: 'center',
-    marginBottom: 10,
-  },
-  primaryButton: {
-    backgroundColor: '#007AFF',
     marginTop: 10,
   },
-  secondaryButton: {
+  saveButton: {
+    backgroundColor: '#007AFF',
+  },
+  signOutButton: {
     backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  buttonDisabled: {
+    backgroundColor: '#9CA3AF',
   },
   buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
-  secondaryButtonText: {
-    color: '#007AFF',
+  signOutButtonText: {
+    color: '#FF3B30',
     fontSize: 16,
+    fontWeight: '600',
   },
 });
 

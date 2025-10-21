@@ -72,6 +72,7 @@ export default function NewChatScreen({ navigation }) {
     const memberDisplayNames = memberIds.map((id) => {
       const profile = userMap[id];
       if (profile?.displayName) return profile.displayName;
+      if (profile?.nickname) return profile.nickname;
       if (profile?.email) return profile.email;
       if (id === user.uid) return user.email || 'You';
       return id;
@@ -84,10 +85,22 @@ export default function NewChatScreen({ navigation }) {
       return '';
     });
 
+    // Generate static chat name (only for group chats with 3+ members)
+    const chatType = selectedIds.length > 1 ? 'group' : 'direct';
     const metadata = {
+      type: chatType,
       memberDisplayNames,
       memberEmails,
     };
+
+    // Only set custom name for group chats (3+ members total)
+    if (memberIds.length >= 3) {
+      const otherMembers = selectedIds.map((id) => {
+        const profile = userMap[id];
+        return profile?.displayName || profile?.nickname || profile?.email || 'User';
+      });
+      metadata.name = otherMembers.join(' & ');
+    }
 
     try {
       setCreating(true);
@@ -104,15 +117,21 @@ export default function NewChatScreen({ navigation }) {
   const renderUserItem = ({ item }) => {
     const isSelected = selectedIds.includes(item.id);
     const displayName = item.displayName || item.email || 'Unknown user';
+    const icon = item.icon || '👤';
 
     return (
       <TouchableOpacity
         style={[styles.userRow, isSelected && styles.userRowSelected]}
         onPress={() => toggleSelect(item.id)}
       >
-        <View>
-          <Text style={styles.userName}>{displayName}</Text>
-          <Text style={styles.userEmail}>{item.email}</Text>
+        <View style={styles.userInfo}>
+          <View style={styles.userAvatar}>
+            <Text style={styles.userAvatarText}>{icon}</Text>
+          </View>
+          <View>
+            <Text style={styles.userName}>{displayName}</Text>
+            <Text style={styles.userEmail}>{item.email}</Text>
+          </View>
         </View>
         <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
           {isSelected && <Text style={styles.checkboxText}>✓</Text>}
@@ -221,6 +240,23 @@ const styles = StyleSheet.create({
   },
   userRowSelected: {
     backgroundColor: '#F0F8FF',
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  userAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  userAvatarText: {
+    fontSize: 24,
   },
   userName: {
     fontSize: 16,

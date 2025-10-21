@@ -9,14 +9,18 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useNetwork } from '../context/NetworkContext';
 import { subscribeToUserChats, subscribeToUsers } from '../utils/firestore';
+import { subscribeToMultiplePresence, isUserOnline } from '../utils/presence';
 
 export default function ChatListScreen({ navigation }) {
   const { user, signOut } = useAuth();
+  const { isOffline } = useNetwork();
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [userProfiles, setUserProfiles] = useState([]);
+  const [presenceData, setPresenceData] = useState({});
 
   useEffect(() => {
     if (!user?.uid) {
@@ -51,6 +55,35 @@ export default function ChatListScreen({ navigation }) {
     };
   }, []);
 
+  // Subscribe to presence for all users in chats
+  useEffect(() => {
+    if (chats.length === 0) return;
+
+    // Get all unique user IDs from all chats
+    const allUserIds = new Set();
+    chats.forEach((chat) => {
+      chat.members?.forEach((memberId) => {
+        if (memberId !== user?.uid) {
+          allUserIds.add(memberId);
+        }
+      });
+    });
+
+    const userIdsArray = Array.from(allUserIds);
+    
+    if (userIdsArray.length === 0) return;
+
+    const unsubscribe = subscribeToMultiplePresence(userIdsArray, (data) => {
+      setPresenceData(data);
+    });
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [chats, user?.uid]);
+
   const handleRefresh = () => {
     setRefreshing(true);
     // Data updates automatically via subscription; just end the indicator
@@ -63,6 +96,10 @@ export default function ChatListScreen({ navigation }) {
 
   const handleNewChat = () => {
     navigation.navigate('NewChat');
+  };
+
+  const handleProfile = () => {
+    navigation.navigate('Profile');
   };
 
   const handleOpenChat = (chat) => {
@@ -88,24 +125,31 @@ export default function ChatListScreen({ navigation }) {
     const members = chat.members || [];
     const otherMembers = members.filter((id) => id !== user?.uid);
 
-    const metadataNames = chat.memberDisplayNames || [];
-    const namesFromMetadata = metadataNames.filter((_, index) => members[index] !== user?.uid);
-
-    const names =
-      namesFromMetadata.length === otherMembers.length && namesFromMetadata.length > 0
-        ? namesFromMetadata
-        : otherMembers.map((id) => {
-            const profile = userProfileMap[id];
-            if (profile?.displayName) return profile.displayName;
-            if (profile?.email) return profile.email;
-            return id;
-          });
-
-    if (names.length === 0) {
+    if (otherMembers.length === 0) {
       return 'Personal Notes';
     }
 
-    return names.join(', ');
+    // Get names from user profiles (real-time data)
+    const names = otherMembers.map((id) => {
+      const profile = userProfileMap[id];
+      if (profile?.displayName) return profile.displayName;
+      if (profile?.nickname) return profile.nickname;
+      if (profile?.email) return profile.email;
+      return 'Unknown';
+    });
+
+    // For 1-on-1 chats (2 members), always use the other user's name
+    if (members.length === 2) {
+      return names[0] || 'Chat';
+    }
+
+    // For group chats (3+ members), use custom name if available
+    if (chat.name) {
+      return chat.name;
+    }
+
+    // Fallback to joined names for groups
+    return names.join(' & ');
   };
 
   const formatTimestamp = (timestamp) => {
@@ -118,8 +162,41 @@ export default function ChatListScreen({ navigation }) {
     });
   };
 
+  const getChatIcon = (chat) => {
+    const members = chat.members || [];
+    const otherMembers = members.filter((id) => id !== user?.uid);
+
+    if (otherMembers.length === 0) {
+      return '📝'; // Personal notes
+    }
+
+    // For 1-on-1 chats (2 members), always show the other user's icon
+    if (members.length === 2) {
+      const profile = userProfileMap[otherMembers[0]];
+      return profile?.icon || '👤';
+    }
+
+    // For group chats (3+ members), use custom icon if set
+    if (chat.icon) {
+      return chat.icon;
+    }
+
+    // Default group icon
+    return '👥';
+  };
+
   const renderChatItem = ({ item }) => {
     const chatTitle = formatMemberNames(item);
+    const chatIcon = getChatIcon(item);
+    
+    // Check if any other members are online
+    const otherMembers = item.members?.filter((id) => id !== user?.uid) || [];
+    const anyOnline = otherMembers.some((memberId) => 
+      isUserOnline(presenceData[memberId])
+    );
+
+    // Calculate unread count (placeholder - would need to subscribe to messages for accurate count)
+    const unreadCount = item.unreadCount || 0;
 
     return (
       <TouchableOpacity
@@ -127,16 +204,31 @@ export default function ChatListScreen({ navigation }) {
         onPress={() => handleOpenChat(item)}
       >
         <View style={styles.chatRow}>
+          <View style={styles.chatAvatarContainer}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {chatIcon}
+              </Text>
+            </View>
+            {anyOnline && <View style={styles.onlineIndicator} />}
+          </View>
           <View style={styles.chatTextContainer}>
             <Text style={styles.chatTitle}>{chatTitle}</Text>
             <Text style={styles.chatSnippet} numberOfLines={1}>
               {item.lastMessage || 'No messages yet'}
             </Text>
           </View>
-          <View>
+          <View style={styles.chatMetaContainer}>
             <Text style={styles.chatTime}>
               {formatTimestamp(item.lastMessageTime)}
             </Text>
+            {unreadCount > 0 && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadText}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       </TouchableOpacity>
@@ -148,14 +240,20 @@ export default function ChatListScreen({ navigation }) {
       <View style={styles.header}>
         <Text style={styles.title}>Chats</Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity onPress={handleNewChat} style={styles.newChatButton}>
-            <Text style={styles.newChatText}>New Chat</Text>
+          <TouchableOpacity onPress={handleProfile} style={styles.profileButton}>
+            <Text style={styles.profileText}>⚙️</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={handleSignOut}>
-            <Text style={styles.signOut}>Sign Out</Text>
+          <TouchableOpacity onPress={handleNewChat} style={styles.newChatButton}>
+            <Text style={styles.newChatText}>➕</Text>
           </TouchableOpacity>
         </View>
       </View>
+
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>📵 You're offline</Text>
+        </View>
+      )}
 
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -199,6 +297,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F1F1F1',
   },
+  offlineBanner: {
+    backgroundColor: '#FFA500',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  offlineText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   title: {
     fontSize: 24,
     fontWeight: '700',
@@ -207,14 +316,19 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 16,
+  },
+  profileButton: {
+    padding: 4,
+  },
+  profileText: {
+    fontSize: 24,
   },
   newChatButton: {
-    marginRight: 16,
+    padding: 4,
   },
   newChatText: {
-    fontSize: 16,
-    color: '#007AFF',
-    fontWeight: '600',
+    fontSize: 24,
   },
   signOut: {
     fontSize: 16,
@@ -237,6 +351,32 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  chatAvatarContainer: {
+    position: 'relative',
+    marginRight: 12,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    fontSize: 24,
+  },
+  onlineIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#34C759',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
   chatTextContainer: {
     flex: 1,
     marginRight: 12,
@@ -251,9 +391,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
   },
+  chatMetaContainer: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
   chatTime: {
     fontSize: 12,
     color: '#9CA3AF',
+  },
+  unreadBadge: {
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   emptyContainer: {
     flexGrow: 1,
