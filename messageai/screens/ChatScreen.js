@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,24 +6,53 @@ import {
   TouchableOpacity,
   StyleSheet,
   SafeAreaView,
-  ScrollView,
+  FlatList,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { createOrGetChat, sendMessage, subscribeToMessages } from '../utils/firestore';
+import {
+  createOrGetChat,
+  sendMessage,
+  subscribeToMessages,
+  subscribeToUsers,
+} from '../utils/firestore';
 
-export default function ChatScreen() {
-  const { user, signOut } = useAuth();
-  const [chatId, setChatId] = useState(null);
+export default function ChatScreen({ route, navigation }) {
+  const { user } = useAuth();
+  const [chatId, setChatId] = useState(route?.params?.chatId ?? null);
+  const [chatMembers, setChatMembers] = useState(route?.params?.members ?? []);
+  const [chatMetadata, setChatMetadata] = useState(route?.params?.metadata ?? {});
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(!route?.params?.chatId);
+  const flatListRef = useRef(null);
+  const [userProfiles, setUserProfiles] = useState([]);
 
-  // Initialize a test chat when component mounts
+  // Initialize chat based on navigation params or fallback to personal chat
   useEffect(() => {
+    if (!user) return;
+
+    if (route?.params?.chatId) {
+      setChatId(route.params.chatId);
+      setChatMembers(route.params?.members ?? []);
+      if (route?.params?.metadata) {
+        setChatMetadata(route.params.metadata);
+      }
+      setLoading(false);
+      return;
+    }
+
     initializeChat();
-  }, [user]);
+  }, [route?.params?.chatId, route?.params?.members, user]);
+
+  useEffect(() => {
+    if (route?.params?.metadata) {
+      setChatMetadata(route.params.metadata);
+    }
+  }, [route?.params?.metadata]);
 
   // Subscribe to messages when chatId is available
   useEffect(() => {
@@ -33,10 +62,32 @@ export default function ChatScreen() {
     const unsubscribe = subscribeToMessages(chatId, (msgs) => {
       console.log('Received messages:', msgs.length);
       setMessages(msgs);
+      // Scroll to bottom when new messages arrive
+      setLoading(false);
+      setTimeout(() => scrollToBottom(), 100);
     });
 
     return () => unsubscribe();
   }, [chatId]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToUsers((profiles) => {
+      setUserProfiles(profiles);
+    });
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, []);
+
+  // Scroll to bottom when messages change
+  const scrollToBottom = () => {
+    if (flatListRef.current && messages.length > 0) {
+      flatListRef.current.scrollToEnd({ animated: true });
+    }
+  };
 
   const initializeChat = async () => {
     if (!user) return;
@@ -45,8 +96,19 @@ export default function ChatScreen() {
       setLoading(true);
       // Create a test chat with just the current user
       // In PR #4, we'll allow selecting other users
-      const testChatId = await createOrGetChat([user.uid]);
+      const testChatId = await createOrGetChat(
+        [user.uid],
+        {
+          memberDisplayNames: [user.email],
+          memberEmails: [user.email],
+        }
+      );
       setChatId(testChatId);
+      setChatMembers([user.uid]);
+      setChatMetadata({
+        memberDisplayNames: [user.email],
+        memberEmails: [user.email],
+      });
       console.log('Chat initialized:', testChatId);
     } catch (error) {
       console.error('Error initializing chat:', error);
@@ -59,66 +121,183 @@ export default function ChatScreen() {
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !chatId) return;
 
+    const messageText = newMessage.trim();
+    const tempId = `temp-${Date.now()}`;
+
+    // Optimistic UI update - add message immediately
+    const optimisticMessage = {
+      id: tempId,
+      text: messageText,
+      senderId: user.uid,
+      senderEmail: user.email,
+      timestamp: { toDate: () => new Date() }, // Temporary timestamp
+      sending: true, // Flag to show sending state
+    };
+
+    setMessages((prev) => [...prev, optimisticMessage]);
+    setNewMessage('');
+    scrollToBottom();
+
     try {
-      await sendMessage(chatId, user.uid, user.email, newMessage.trim());
-      setNewMessage('');
+      await sendMessage(chatId, user.uid, user.email, messageText);
+      // Message will be updated by real-time listener
     } catch (error) {
       console.error('Error sending message:', error);
       Alert.alert('Error', 'Failed to send message: ' + error.message);
+      // Remove optimistic message on failure
+      setMessages((prev) => prev.filter((msg) => msg.id !== tempId));
     }
   };
 
-  const handleSignOut = async () => {
-    await signOut();
+  const canGoBack = navigation?.canGoBack?.() ?? false;
+  const userProfileMap = useMemo(() => {
+    const map = {};
+    userProfiles.forEach((profile) => {
+      map[profile.id] = profile;
+    });
+    return map;
+  }, [userProfiles]);
+
+  const metadataNameMap = useMemo(() => {
+    const map = {};
+    const metaNames = chatMetadata?.memberDisplayNames;
+    if (Array.isArray(metaNames) && chatMembers?.length) {
+      chatMembers.forEach((memberId, index) => {
+        const name = metaNames[index];
+        if (name) {
+          map[memberId] = name;
+        }
+      });
+    }
+    return map;
+  }, [chatMetadata?.memberDisplayNames, chatMembers]);
+
+  const getDisplayName = (memberId, fallbackEmail) => {
+    const metaName = metadataNameMap[memberId];
+    if (metaName) return metaName;
+    const profile = userProfileMap[memberId];
+    if (profile?.displayName) return profile.displayName;
+    if (profile?.email) return profile.email;
+    if (fallbackEmail) return fallbackEmail;
+    return memberId;
+  };
+
+  const chatTitle = useMemo(() => {
+    if (!chatMembers?.length) return 'Chat';
+    const others = chatMembers.filter((id) => id !== user?.uid);
+    if (others.length === 0) return 'Personal Notes';
+    const names = others.map((id) => getDisplayName(id));
+    return names.join(', ');
+  }, [chatMembers, metadataNameMap, userProfileMap, user?.uid]);
+
+  const formatTime = (timestamp) => {
+    if (!timestamp?.toDate) return '';
+    const date = timestamp.toDate();
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
+
+  const renderMessage = ({ item }) => {
+    const isMyMessage = item.senderId === user.uid;
+    const senderName = getDisplayName(item.senderId, item.senderEmail);
+
+    return (
+      <View
+        style={[
+          styles.messageContainer,
+          isMyMessage ? styles.myMessageContainer : styles.theirMessageContainer,
+        ]}
+      >
+        <View
+          style={[
+            styles.messageBubble,
+            isMyMessage ? styles.myMessageBubble : styles.theirMessageBubble,
+            item.sending && styles.sendingMessage,
+          ]}
+        >
+          {!isMyMessage && (
+            <Text style={styles.senderName}>{senderName}</Text>
+          )}
+          <Text
+            style={[
+              styles.messageText,
+              isMyMessage ? styles.myMessageText : styles.theirMessageText,
+            ]}
+          >
+            {item.text}
+          </Text>
+          <Text
+            style={[
+              styles.timeText,
+              isMyMessage ? styles.myTimeText : styles.theirTimeText,
+            ]}
+          >
+            {formatTime(item.timestamp)} {item.sending && '●'}
+          </Text>
+        </View>
+      </View>
+    );
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>MessageAI</Text>
-        <TouchableOpacity onPress={handleSignOut} style={styles.signOutButton}>
-          <Text style={styles.signOutText}>Sign Out</Text>
-        </TouchableOpacity>
+        <View style={styles.headerSide}>
+          {canGoBack && (
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={styles.backButton}
+            >
+              <Text style={styles.backButtonText}>Back</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        <View style={styles.headerTitleWrapper}>
+          <Text style={styles.title}>{chatTitle}</Text>
+        </View>
+        <View style={styles.headerSide} />
       </View>
 
-      <View style={styles.content}>
-        <Text style={styles.emailText}>Logged in as: {user?.email}</Text>
-        {chatId && (
-          <Text style={styles.chatIdText}>Chat ID: {chatId.substring(0, 8)}...</Text>
-        )}
-
+      <KeyboardAvoidingView
+        style={styles.content}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={90}
+      >
         {loading ? (
           <ActivityIndicator size="large" color="#007AFF" style={styles.loader} />
         ) : (
           <>
-            <ScrollView style={styles.messagesContainer}>
-              {messages.length === 0 ? (
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              renderItem={renderMessage}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.messagesList}
+              ListEmptyComponent={
                 <Text style={styles.emptyText}>
-                  No messages yet. Send a test message below!
+                  No messages yet. Start the conversation! 💬
                 </Text>
-              ) : (
-                messages.map((message) => (
-                  <View key={message.id} style={styles.messageItem}>
-                    <Text style={styles.senderEmail}>{message.senderEmail}</Text>
-                    <Text style={styles.messageText}>{message.text}</Text>
-                    <Text style={styles.messageTime}>
-                      {message.timestamp?.toDate?.()?.toLocaleTimeString() || 'Sending...'}
-                    </Text>
-                  </View>
-                ))
-              )}
-            </ScrollView>
+              }
+              onContentSizeChange={() => scrollToBottom()}
+            />
 
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.input}
-                placeholder="Type a test message..."
+                placeholder="Type a message..."
                 value={newMessage}
                 onChangeText={setNewMessage}
                 multiline
+                maxLength={1000}
               />
               <TouchableOpacity
-                style={styles.sendButton}
+                style={[
+                  styles.sendButton,
+                  !newMessage.trim() && styles.sendButtonDisabled,
+                ]}
                 onPress={handleSendMessage}
                 disabled={!newMessage.trim()}
               >
@@ -127,12 +306,7 @@ export default function ChatScreen() {
             </View>
           </>
         )}
-
-        <Text style={styles.infoText}>
-          PR #3: Testing Firestore Schema{'\n'}
-          Full chat UI coming in PR #4
-        </Text>
-      </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -140,92 +314,126 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f5f5f5',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    padding: 16,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#000',
   },
-  signOutButton: {
-    padding: 10,
+  headerSide: {
+    width: 72,
   },
-  signOutText: {
+  headerTitleWrapper: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  backButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  backButtonText: {
     color: '#007AFF',
     fontSize: 16,
+    fontWeight: '600',
   },
   content: {
     flex: 1,
-    padding: 20,
-  },
-  emailText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 5,
-    textAlign: 'center',
-  },
-  chatIdText: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: 15,
-    textAlign: 'center',
   },
   loader: {
-    marginTop: 50,
-  },
-  messagesContainer: {
     flex: 1,
-    marginBottom: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  messagesList: {
+    padding: 16,
+    flexGrow: 1,
   },
   emptyText: {
     fontSize: 16,
     color: '#999',
     textAlign: 'center',
-    marginTop: 50,
+    marginTop: 100,
   },
-  messageItem: {
-    backgroundColor: '#f0f0f0',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 10,
+  messageContainer: {
+    marginBottom: 12,
+    flexDirection: 'row',
   },
-  senderEmail: {
+  myMessageContainer: {
+    justifyContent: 'flex-end',
+  },
+  theirMessageContainer: {
+    justifyContent: 'flex-start',
+  },
+  messageBubble: {
+    maxWidth: '75%',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  myMessageBubble: {
+    backgroundColor: '#007AFF',
+    borderBottomRightRadius: 4,
+  },
+  theirMessageBubble: {
+    backgroundColor: '#E5E5EA',
+    borderBottomLeftRadius: 4,
+  },
+  sendingMessage: {
+    opacity: 0.7,
+  },
+  senderName: {
     fontSize: 12,
-    color: '#007AFF',
+    color: '#666',
     fontWeight: '600',
     marginBottom: 4,
   },
   messageText: {
     fontSize: 16,
-    color: '#333',
-    marginBottom: 4,
+    lineHeight: 20,
   },
-  messageTime: {
+  myMessageText: {
+    color: '#fff',
+  },
+  theirMessageText: {
+    color: '#000',
+  },
+  timeText: {
     fontSize: 11,
-    color: '#999',
+    marginTop: 4,
+  },
+  myTimeText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  theirTimeText: {
+    color: '#666',
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
-    paddingTop: 10,
   },
   input: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f0f0f0',
     borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    marginRight: 10,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 10,
+    marginRight: 8,
     maxHeight: 100,
     fontSize: 16,
   },
@@ -234,17 +442,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 20,
     paddingVertical: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sendButtonDisabled: {
+    backgroundColor: '#B0B0B0',
   },
   sendButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
-  infoText: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'center',
-    marginTop: 15,
-  },
 });
-

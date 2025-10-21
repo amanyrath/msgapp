@@ -62,6 +62,7 @@ export default function LoginScreen({ navigation }) {
             secureTextEntry
             autoComplete="off"
             textContentType="none"
+            passwordRules=""
             editable={!isLoading}
           />
 

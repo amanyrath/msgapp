@@ -1,11 +1,12 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { 
-  createUserWithEmailAndPassword, 
+import {
+  createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
-  onAuthStateChanged 
+  onAuthStateChanged,
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
+import { createUserProfile } from '../utils/firestore';
 
 const AuthContext = createContext({});
 
@@ -36,6 +37,15 @@ export const AuthProvider = ({ children }) => {
       setError(null);
       setLoading(true);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const displayName = email.split('@')[0];
+      await createUserProfile(
+        userCredential.user.uid,
+        {
+          email,
+          displayName,
+        },
+        { setCreatedAt: true }
+      );
       console.log('Sign up successful:', userCredential.user.email);
       return { success: true };
     } catch (error) {
@@ -53,6 +63,11 @@ export const AuthProvider = ({ children }) => {
       setError(null);
       setLoading(true);
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const displayName = email.split('@')[0];
+      await createUserProfile(userCredential.user.uid, {
+        email,
+        displayName,
+      });
       console.log('Sign in successful:', userCredential.user.email);
       return { success: true };
     } catch (error) {
@@ -100,4 +115,3 @@ export const useAuth = () => {
 };
 
 export default AuthContext;
-

@@ -32,9 +32,10 @@ import { db } from '../config/firebase';
 /**
  * Create or get a chat between users
  * @param {Array<string>} memberIds - Array of user IDs
+ * @param {Object} metadata - Additional fields to set when creating a chat
  * @returns {Promise<string>} - Chat ID
  */
-export const createOrGetChat = async (memberIds) => {
+export const createOrGetChat = async (memberIds, metadata = {}) => {
   try {
     // Sort member IDs for consistent chat lookup
     const sortedMembers = [...memberIds].sort();
@@ -46,6 +47,11 @@ export const createOrGetChat = async (memberIds) => {
     
     if (!querySnapshot.empty) {
       // Chat exists, return the ID
+      const existingChatId = querySnapshot.docs[0].id;
+      if (metadata && Object.keys(metadata).length > 0) {
+        const chatRef = doc(db, 'chats', existingChatId);
+        await setDoc(chatRef, metadata, { merge: true });
+      }
       return querySnapshot.docs[0].id;
     }
     
@@ -55,6 +61,7 @@ export const createOrGetChat = async (memberIds) => {
       createdAt: serverTimestamp(),
       lastMessage: '',
       lastMessageTime: serverTimestamp(),
+      ...metadata,
     };
     
     const chatRef = await addDoc(chatsRef, chatData);
@@ -167,6 +174,89 @@ export const getUserChats = async (userId) => {
 };
 
 /**
+ * Subscribe to all chats for a user (real-time)
+ * @param {string} userId - User ID
+ * @param {Function} callback - Receives updated chat array
+ * @returns {Function} - Unsubscribe handler
+ */
+export const subscribeToUserChats = (userId, callback) => {
+  try {
+    const chatsRef = collection(db, 'chats');
+    const q = query(
+      chatsRef,
+      where('members', 'array-contains', userId),
+      orderBy('lastMessageTime', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const chats = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      callback(chats);
+    });
+
+    return unsubscribe;
+  } catch (error) {
+    console.error('Error subscribing to user chats:', error);
+    throw error;
+  }
+};
+
+/**
+ * Create or update a user profile document.
+ * @param {string} userId - User ID
+ * @param {Object} profile - Profile fields (email, displayName, photoURL, etc.)
+ * @param {Object} options - Additional options
+ * @param {boolean} [options.setCreatedAt=false] - Whether to set createdAt timestamp
+ */
+export const createUserProfile = async (userId, profile, options = {}) => {
+  try {
+    const { setCreatedAt = false } = options;
+    const userRef = doc(db, 'users', userId);
+
+    const payload = {
+      ...profile,
+      updatedAt: serverTimestamp(),
+    };
+
+    if (setCreatedAt) {
+      payload.createdAt = serverTimestamp();
+    }
+
+    await setDoc(userRef, payload, { merge: true });
+  } catch (error) {
+    console.error('Error creating/updating user profile:', error);
+    throw error;
+  }
+};
+
+/**
+ * Subscribe to all user profiles.
+ * @param {Function} callback - Receives array of user profiles
+ * @returns {Function} - Unsubscribe handler
+ */
+export const subscribeToUsers = (callback) => {
+  try {
+    const usersRef = collection(db, 'users');
+    const q = query(usersRef, orderBy('displayName'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const users = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      callback(users);
+    });
+
+    return unsubscribe;
+  } catch (error) {
+    console.error('Error subscribing to users:', error);
+    throw error;
+  }
+};
+
+/**
  * Get chat details
  * @param {string} chatId - Chat ID
  * @returns {Promise<Object>} - Chat data
@@ -189,4 +279,3 @@ export const getChat = async (chatId) => {
     throw error;
   }
 };
-

@@ -8,6 +8,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignupScreen';
 import ChatScreen from './screens/ChatScreen';
+import ChatListScreen from './screens/ChatListScreen';
+import NewChatScreen from './screens/NewChatScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -32,7 +34,11 @@ function Navigation() {
       >
         {user ? (
           // User is signed in - show main app
-          <Stack.Screen name="Chat" component={ChatScreen} />
+          <>
+            <Stack.Screen name="ChatList" component={ChatListScreen} />
+            <Stack.Screen name="NewChat" component={NewChatScreen} />
+            <Stack.Screen name="Chat" component={ChatScreen} />
+          </>
         ) : (
           // User is not signed in - show auth screens
           <>

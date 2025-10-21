@@ -75,6 +75,7 @@ export default function SignupScreen({ navigation }) {
             secureTextEntry
             autoComplete="off"
             textContentType="none"
+            passwordRules=""
             editable={!isLoading}
           />
 
@@ -86,6 +87,7 @@ export default function SignupScreen({ navigation }) {
             secureTextEntry
             autoComplete="off"
             textContentType="none"
+            passwordRules=""
             editable={!isLoading}
           />
 
