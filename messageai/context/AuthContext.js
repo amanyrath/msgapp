@@ -5,7 +5,8 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
 } from 'firebase/auth';
-import { auth } from '../config/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../config/firebase';
 import { createUserProfile } from '../utils/firestore';
 import { setUserOnline, setUserOffline } from '../utils/presence';
 
@@ -26,10 +27,26 @@ export const AuthProvider = ({ children }) => {
         console.log('User signed in:', user.email);
         // Set user presence as online (skip if RTDB not initialized)
         try {
-          const displayName = user.email?.split('@')[0] || 'User';
+          // Fetch user profile to get nickname and icon
+          const userRef = doc(db, 'users', user.uid);
+          const userSnap = await getDoc(userRef);
+          
+          let displayName = user.email?.split('@')[0] || 'User';
+          let nickname = displayName;
+          let icon = '👤';
+          
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            displayName = userData.displayName || displayName;
+            nickname = userData.nickname || displayName;
+            icon = userData.icon || icon;
+          }
+          
           await setUserOnline(user.uid, {
             email: user.email,
             displayName,
+            nickname,
+            icon,
           });
         } catch (error) {
           console.log('Presence not available:', error.message);
@@ -44,17 +61,18 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // Sign up with email and password
-  const signUp = async (email, password) => {
+  const signUp = async (email, password, nickname, icon) => {
     try {
       setError(null);
       setLoading(true);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const displayName = email.split('@')[0];
       await createUserProfile(
         userCredential.user.uid,
         {
           email,
-          displayName,
+          displayName: nickname,
+          nickname,
+          icon,
         },
         { setCreatedAt: true }
       );

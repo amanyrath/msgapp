@@ -16,6 +16,8 @@ export default function SignupScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [icon, setIcon] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { signUp } = useAuth();
 
@@ -36,8 +38,23 @@ export default function SignupScreen({ navigation }) {
       return;
     }
 
+    if (!nickname || nickname.trim().length === 0) {
+      Alert.alert('Error', 'Please enter a nickname');
+      return;
+    }
+
+    if (nickname.length > 20) {
+      Alert.alert('Error', 'Nickname must be 20 characters or less');
+      return;
+    }
+
+    if (!icon || icon.trim().length === 0) {
+      Alert.alert('Error', 'Please enter an icon (emoji)');
+      return;
+    }
+
     setIsLoading(true);
-    const result = await signUp(email, password);
+    const result = await signUp(email, password, nickname.trim(), icon.trim());
     setIsLoading(false);
 
     if (!result.success) {
@@ -64,6 +81,25 @@ export default function SignupScreen({ navigation }) {
             autoCapitalize="none"
             keyboardType="email-address"
             autoComplete="email"
+            editable={!isLoading}
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Nickname"
+            value={nickname}
+            onChangeText={setNickname}
+            autoCapitalize="words"
+            maxLength={20}
+            editable={!isLoading}
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Icon (emoji, e.g., 😊 or 🚀)"
+            value={icon}
+            onChangeText={setIcon}
+            maxLength={2}
             editable={!isLoading}
           />
 

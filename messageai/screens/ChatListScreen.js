@@ -146,8 +146,27 @@ export default function ChatListScreen({ navigation }) {
     });
   };
 
+  const getChatIcon = (chat) => {
+    const members = chat.members || [];
+    const otherMembers = members.filter((id) => id !== user?.uid);
+
+    if (otherMembers.length === 0) {
+      return '📝'; // Personal notes
+    }
+
+    // For 1-on-1 chats, show the other user's icon
+    if (otherMembers.length === 1) {
+      const profile = userProfileMap[otherMembers[0]];
+      return profile?.icon || '👤';
+    }
+
+    // For group chats, show group icon
+    return '👥';
+  };
+
   const renderChatItem = ({ item }) => {
     const chatTitle = formatMemberNames(item);
+    const chatIcon = getChatIcon(item);
     
     // Check if any other members are online
     const otherMembers = item.members?.filter((id) => id !== user?.uid) || [];
@@ -167,7 +186,7 @@ export default function ChatListScreen({ navigation }) {
           <View style={styles.chatAvatarContainer}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>
-                {chatTitle[0]?.toUpperCase() || '?'}
+                {chatIcon}
               </Text>
             </View>
             {anyOnline && <View style={styles.onlineIndicator} />}
@@ -319,9 +338,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '600',
+    fontSize: 24,
   },
   onlineIndicator: {
     position: 'absolute',

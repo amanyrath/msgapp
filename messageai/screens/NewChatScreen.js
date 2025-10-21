@@ -104,15 +104,21 @@ export default function NewChatScreen({ navigation }) {
   const renderUserItem = ({ item }) => {
     const isSelected = selectedIds.includes(item.id);
     const displayName = item.displayName || item.email || 'Unknown user';
+    const icon = item.icon || '👤';
 
     return (
       <TouchableOpacity
         style={[styles.userRow, isSelected && styles.userRowSelected]}
         onPress={() => toggleSelect(item.id)}
       >
-        <View>
-          <Text style={styles.userName}>{displayName}</Text>
-          <Text style={styles.userEmail}>{item.email}</Text>
+        <View style={styles.userInfo}>
+          <View style={styles.userAvatar}>
+            <Text style={styles.userAvatarText}>{icon}</Text>
+          </View>
+          <View>
+            <Text style={styles.userName}>{displayName}</Text>
+            <Text style={styles.userEmail}>{item.email}</Text>
+          </View>
         </View>
         <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
           {isSelected && <Text style={styles.checkboxText}>✓</Text>}
@@ -221,6 +227,23 @@ const styles = StyleSheet.create({
   },
   userRowSelected: {
     backgroundColor: '#F0F8FF',
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  userAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  userAvatarText: {
+    fontSize: 24,
   },
   userName: {
     fontSize: 16,

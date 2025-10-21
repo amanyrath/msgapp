@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
+import { useNotifications } from '../context/NotificationContext';
 import {
   createOrGetChat,
   sendMessage,
@@ -26,6 +27,7 @@ import { subscribeToMultiplePresence, getPresenceText, isUserOnline } from '../u
 export default function ChatScreen({ route, navigation }) {
   const { user } = useAuth();
   const { isOffline } = useNetwork();
+  const { setActiveChatId } = useNotifications();
   const [chatId, setChatId] = useState(route?.params?.chatId ?? null);
   const [chatMembers, setChatMembers] = useState(route?.params?.members ?? []);
   const [chatMetadata, setChatMetadata] = useState(route?.params?.metadata ?? {});
@@ -58,6 +60,20 @@ export default function ChatScreen({ route, navigation }) {
       setChatMetadata(route.params.metadata);
     }
   }, [route?.params?.metadata]);
+
+  // Set this chat as active to prevent notifications
+  useEffect(() => {
+    if (chatId) {
+      setActiveChatId(chatId);
+      console.log('📵 Notifications disabled for chat:', chatId);
+    }
+    
+    // Clear active chat when leaving
+    return () => {
+      setActiveChatId(null);
+      console.log('🔔 Notifications re-enabled');
+    };
+  }, [chatId, setActiveChatId]);
 
   // Subscribe to messages when chatId is available
   useEffect(() => {
@@ -159,12 +175,17 @@ export default function ChatScreen({ route, navigation }) {
     const messageText = newMessage.trim();
     const tempId = `temp-${Date.now()}`;
 
+    // Get current user's profile for nickname
+    const currentUserProfile = userProfiles.find(p => p.id === user.uid);
+    const senderName = currentUserProfile?.displayName || currentUserProfile?.nickname || user.email?.split('@')[0] || 'User';
+
     // Optimistic UI update - add message immediately
     const optimisticMessage = {
       id: tempId,
       text: messageText,
       senderId: user.uid,
       senderEmail: user.email,
+      senderName,
       timestamp: { toDate: () => new Date() }, // Temporary timestamp
       sending: true, // Flag to show sending state
     };
@@ -174,7 +195,7 @@ export default function ChatScreen({ route, navigation }) {
     scrollToBottom();
 
     try {
-      await sendMessage(chatId, user.uid, user.email, messageText);
+      await sendMessage(chatId, user.uid, user.email, messageText, senderName);
       // Message will be updated by real-time listener
     } catch (error) {
       console.error('Error sending message:', error);

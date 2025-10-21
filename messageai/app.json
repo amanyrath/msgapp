@@ -25,8 +25,28 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.amanyrath.messageai"
+      "package": "com.amanyrath.messageai",
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED"
+      ]
     },
+    "notification": {
+      "icon": "./assets/icon.png",
+      "color": "#007AFF",
+      "androidMode": "default",
+      "androidCollapsedTitle": "New messages"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#007AFF",
+          "sounds": ["default"],
+          "mode": "production"
+        }
+      ]
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     },

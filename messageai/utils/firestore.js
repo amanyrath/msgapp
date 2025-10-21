@@ -120,9 +120,10 @@ export const createOrGetChat = async (memberIds, metadata = {}) => {
  * @param {string} senderId - Sender's user ID
  * @param {string} senderEmail - Sender's email
  * @param {string} text - Message text
+ * @param {string} senderName - Sender's display name/nickname (optional)
  * @returns {Promise<string>} - Message ID
  */
-export const sendMessage = async (chatId, senderId, senderEmail, text) => {
+export const sendMessage = async (chatId, senderId, senderEmail, text, senderName = null) => {
   return retryOperation(async () => {
     try {
       const messagesRef = collection(db, 'chats', chatId, 'messages');
@@ -134,6 +135,11 @@ export const sendMessage = async (chatId, senderId, senderEmail, text) => {
         timestamp: serverTimestamp(),
         readBy: [senderId], // Sender has "read" their own message
       };
+
+      // Add sender name if provided
+      if (senderName) {
+        messageData.senderName = senderName;
+      }
       
       const messageRef = await addDoc(messagesRef, messageData);
       

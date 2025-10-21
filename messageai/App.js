@@ -2,9 +2,13 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, ActivityIndicator, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useEffect, useRef } from 'react';
+import * as Notifications from 'expo-notifications';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NetworkProvider } from './context/NetworkContext';
+import { NotificationProvider } from './context/NotificationContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import { registerForPushNotifications } from './utils/notifications';
 
 // Import screens
 import LoginScreen from './screens/LoginScreen';
@@ -17,6 +21,28 @@ const Stack = createNativeStackNavigator();
 
 function Navigation() {
   const { user, loading } = useAuth();
+  const navigationRef = useRef();
+
+  // Request notification permissions when user logs in
+  useEffect(() => {
+    if (user) {
+      registerForPushNotifications();
+    }
+  }, [user]);
+
+  // Handle notification taps
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const { chatId, chatData } = response.notification.request.content.data;
+      
+      // Navigate to the chat when notification is tapped
+      if (navigationRef.current && chatId && chatData) {
+        navigationRef.current.navigate('Chat', { chat: chatData });
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
 
   // Show loading screen while checking auth state
   if (loading) {
@@ -28,7 +54,7 @@ function Navigation() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
@@ -58,8 +84,10 @@ export default function App() {
     <ErrorBoundary>
       <NetworkProvider>
         <AuthProvider>
-          <Navigation />
-          <StatusBar style="auto" />
+          <NotificationProvider>
+            <Navigation />
+            <StatusBar style="auto" />
+          </NotificationProvider>
         </AuthProvider>
       </NetworkProvider>
     </ErrorBoundary>
