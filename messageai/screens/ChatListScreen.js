@@ -98,6 +98,10 @@ export default function ChatListScreen({ navigation }) {
     navigation.navigate('NewChat');
   };
 
+  const handleProfile = () => {
+    navigation.navigate('Profile');
+  };
+
   const handleOpenChat = (chat) => {
     navigation.navigate('Chat', {
       chatId: chat.id,
@@ -219,11 +223,11 @@ export default function ChatListScreen({ navigation }) {
       <View style={styles.header}>
         <Text style={styles.title}>Chats</Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity onPress={handleNewChat} style={styles.newChatButton}>
-            <Text style={styles.newChatText}>New Chat</Text>
+          <TouchableOpacity onPress={handleProfile} style={styles.profileButton}>
+            <Text style={styles.profileText}>⚙️</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={handleSignOut}>
-            <Text style={styles.signOut}>Sign Out</Text>
+          <TouchableOpacity onPress={handleNewChat} style={styles.newChatButton}>
+            <Text style={styles.newChatText}>➕</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -295,14 +299,19 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 16,
+  },
+  profileButton: {
+    padding: 4,
+  },
+  profileText: {
+    fontSize: 24,
   },
   newChatButton: {
-    marginRight: 16,
+    padding: 4,
   },
   newChatText: {
-    fontSize: 16,
-    color: '#007AFF',
-    fontWeight: '600',
+    fontSize: 24,
   },
   signOut: {
     fontSize: 16,
