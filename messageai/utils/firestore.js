@@ -18,10 +18,12 @@ import { db } from '../config/firebase';
  * Firestore Schema:
  * 
  * /chats/{chatId}
+ *   - name: string - Static chat name (e.g., "John & Jane" or "Team Chat")
  *   - members: [userId1, userId2, ...]
  *   - createdAt: timestamp
  *   - lastMessage: string
  *   - lastMessageTime: timestamp
+ *   - type: 'direct' | 'group' - Chat type
  * 
  * /chats/{chatId}/messages/{messageId}
  *   - senderId: string

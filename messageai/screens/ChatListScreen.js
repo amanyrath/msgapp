@@ -122,6 +122,12 @@ export default function ChatListScreen({ navigation }) {
   }, [userProfiles]);
 
   const formatMemberNames = (chat) => {
+    // Use static chat name if available
+    if (chat.name) {
+      return chat.name;
+    }
+
+    // Fallback to dynamic name generation
     const members = chat.members || [];
     const otherMembers = members.filter((id) => id !== user?.uid);
 
@@ -133,11 +139,12 @@ export default function ChatListScreen({ navigation }) {
     const names = otherMembers.map((id) => {
       const profile = userProfileMap[id];
       if (profile?.displayName) return profile.displayName;
+      if (profile?.nickname) return profile.nickname;
       if (profile?.email) return profile.email;
       return 'Unknown';
     });
 
-    return names.join(', ');
+    return names.join(' & ');
   };
 
   const formatTimestamp = (timestamp) => {

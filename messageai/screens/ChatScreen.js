@@ -243,12 +243,18 @@ export default function ChatScreen({ route, navigation }) {
   };
 
   const chatTitle = useMemo(() => {
+    // Use static chat name if available
+    if (chatMetadata?.name) {
+      return chatMetadata.name;
+    }
+    
+    // Fallback to dynamic name generation
     if (!chatMembers?.length) return 'Chat';
     const others = chatMembers.filter((id) => id !== user?.uid);
     if (others.length === 0) return 'Personal Notes';
     const names = others.map((id) => getDisplayName(id)).filter(Boolean);
-    return names.length > 0 ? names.join(', ') : 'Chat';
-  }, [chatMembers, metadataNameMap, userProfileMap, user?.uid]);
+    return names.length > 0 ? names.join(' & ') : 'Chat';
+  }, [chatMembers, chatMetadata?.name, metadataNameMap, userProfileMap, user?.uid]);
 
   const chatPresenceText = useMemo(() => {
     if (!chatMembers?.length) return '';
