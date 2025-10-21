@@ -23,6 +23,13 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
 
+console.log('✅ Firebase initialized:', {
+  auth: !!auth,
+  firestore: !!db,
+  rtdb: !!rtdb,
+  databaseURL: firebaseConfig.databaseURL
+});
+
 // Enable offline persistence
 enableIndexedDbPersistence(db).catch((err) => {
   if (err.code === 'failed-precondition') {

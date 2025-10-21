@@ -24,12 +24,16 @@ export const AuthProvider = ({ children }) => {
       
       if (user) {
         console.log('User signed in:', user.email);
-        // Set user presence as online
-        const displayName = user.email?.split('@')[0] || 'User';
-        await setUserOnline(user.uid, {
-          email: user.email,
-          displayName,
-        });
+        // Set user presence as online (skip if RTDB not initialized)
+        try {
+          const displayName = user.email?.split('@')[0] || 'User';
+          await setUserOnline(user.uid, {
+            email: user.email,
+            displayName,
+          });
+        } catch (error) {
+          console.log('Presence not available:', error.message);
+        }
       } else {
         console.log('User signed out');
       }
@@ -92,9 +96,13 @@ export const AuthProvider = ({ children }) => {
     try {
       setError(null);
       
-      // Set user as offline before signing out
+      // Set user as offline before signing out (skip if RTDB not initialized)
       if (user?.uid) {
-        await setUserOffline(user.uid);
+        try {
+          await setUserOffline(user.uid);
+        } catch (presenceError) {
+          console.log('Could not update presence on logout:', presenceError.message);
+        }
       }
       
       await firebaseSignOut(auth);

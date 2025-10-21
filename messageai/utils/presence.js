@@ -7,6 +7,11 @@ import { rtdb } from '../config/firebase';
  * @param {Object} userData - Additional user data (email, displayName)
  */
 export const setUserOnline = async (userId, userData = {}) => {
+  if (!rtdb) {
+    console.error('RTDB not initialized');
+    return;
+  }
+  
   try {
     const userStatusRef = ref(rtdb, `status/${userId}`);
     
@@ -40,6 +45,11 @@ export const setUserOnline = async (userId, userData = {}) => {
  * @param {string} userId - User ID
  */
 export const setUserOffline = async (userId) => {
+  if (!rtdb) {
+    console.error('RTDB not initialized');
+    return;
+  }
+  
   try {
     const userStatusRef = ref(rtdb, `status/${userId}`);
     
@@ -64,14 +74,26 @@ export const setUserOffline = async (userId) => {
  * @returns {Function} - Unsubscribe function
  */
 export const subscribeToUserPresence = (userId, callback) => {
-  const userStatusRef = ref(rtdb, `status/${userId}`);
+  if (!rtdb) {
+    console.error('RTDB not initialized');
+    return () => {};
+  }
   
-  const unsubscribe = onValue(userStatusRef, (snapshot) => {
-    const data = snapshot.val();
-    callback(data);
-  });
-  
-  return unsubscribe;
+  try {
+    const userStatusRef = ref(rtdb, `status/${userId}`);
+    
+    const unsubscribe = onValue(userStatusRef, (snapshot) => {
+      const data = snapshot.val();
+      callback(data);
+    }, (error) => {
+      console.error('Error in presence listener:', error);
+    });
+    
+    return unsubscribe;
+  } catch (error) {
+    console.error('Error subscribing to presence:', error);
+    return () => {};
+  }
 };
 
 /**
@@ -81,24 +103,40 @@ export const subscribeToUserPresence = (userId, callback) => {
  * @returns {Function} - Unsubscribe function
  */
 export const subscribeToMultiplePresence = (userIds, callback) => {
+  if (!rtdb) {
+    console.error('RTDB not initialized');
+    return () => {};
+  }
+  
+  if (!userIds || userIds.length === 0) {
+    return () => {};
+  }
+  
   const unsubscribers = [];
   const presenceMap = {};
   
-  userIds.forEach((userId) => {
-    const userStatusRef = ref(rtdb, `status/${userId}`);
-    
-    const unsubscribe = onValue(userStatusRef, (snapshot) => {
-      presenceMap[userId] = snapshot.val();
-      callback({ ...presenceMap });
+  try {
+    userIds.forEach((userId) => {
+      const userStatusRef = ref(rtdb, `status/${userId}`);
+      
+      const unsubscribe = onValue(userStatusRef, (snapshot) => {
+        presenceMap[userId] = snapshot.val();
+        callback({ ...presenceMap });
+      }, (error) => {
+        console.error(`Error in presence listener for ${userId}:`, error);
+      });
+      
+      unsubscribers.push(unsubscribe);
     });
     
-    unsubscribers.push(unsubscribe);
-  });
-  
-  // Return combined unsubscribe function
-  return () => {
-    unsubscribers.forEach((unsub) => unsub());
-  };
+    // Return combined unsubscribe function
+    return () => {
+      unsubscribers.forEach((unsub) => unsub());
+    };
+  } catch (error) {
+    console.error('Error subscribing to multiple presence:', error);
+    return () => {};
+  }
 };
 
 /**
