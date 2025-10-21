@@ -101,7 +101,7 @@ export default function ChatScreen({ route, navigation }) {
     };
   }, [chatId, setActiveChatId]);
 
-  // Subscribe to messages when chatId is available
+  // Subscribe to messages with PAGINATION (load last 50 messages)
   useEffect(() => {
     if (!chatId) return;
 
@@ -113,7 +113,7 @@ export default function ChatScreen({ route, navigation }) {
       setLoading(false);
       setTimeout(() => scrollToBottom(), 100);
       
-      // Mark unread messages as read
+      // Mark unread messages as read (batch operation)
       if (user?.uid) {
         const unreadMessages = msgs.filter(
           msg => msg.senderId !== user.uid && !(msg.readBy || []).includes(user.uid)
@@ -124,14 +124,22 @@ export default function ChatScreen({ route, navigation }) {
           markMessagesAsRead(chatId, unreadIds, user.uid);
         }
       }
-    });
+    }, 50); // LIMIT: Only load last 50 messages for performance
 
     return () => unsubscribe();
   }, [chatId, user?.uid]);
 
+  // OPTIMIZED: Only load profiles for chat members (not ALL users)
   useEffect(() => {
+    if (!chatMembers || chatMembers.length === 0) return;
+
+    // Only subscribe to profiles for users in this chat
     const unsubscribe = subscribeToUsers((profiles) => {
-      setUserProfiles(profiles);
+      // Filter to only chat members
+      const relevantProfiles = profiles.filter(profile => 
+        chatMembers.includes(profile.id)
+      );
+      setUserProfiles(relevantProfiles);
     });
 
     return () => {
@@ -139,7 +147,7 @@ export default function ChatScreen({ route, navigation }) {
         unsubscribe();
       }
     };
-  }, []);
+  }, [chatMembers]);
 
   // Subscribe to presence for chat members
   useEffect(() => {
@@ -159,9 +167,9 @@ export default function ChatScreen({ route, navigation }) {
     };
   }, [chatMembers, user?.uid]);
 
-  // Subscribe to typing indicators
+  // Subscribe to typing indicators (OPTIMIZED: only if chat has multiple users)
   useEffect(() => {
-    if (!chatId) return;
+    if (!chatId || !chatMembers || chatMembers.length <= 1) return;
 
     const unsubscribe = subscribeToTypingUsers(chatId, (typingUserIds) => {
       setTypingUsers(typingUserIds);
@@ -172,7 +180,7 @@ export default function ChatScreen({ route, navigation }) {
         unsubscribe();
       }
     };
-  }, [chatId]);
+  }, [chatId, chatMembers]);
 
   // Cleanup typing timeout on unmount
   useEffect(() => {

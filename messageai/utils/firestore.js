@@ -8,6 +8,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   serverTimestamp,
   onSnapshot,
   arrayUnion,
@@ -230,15 +231,25 @@ export const sendPhotoMessage = async (chatId, senderId, senderEmail, photo, sen
 };
 
 /**
- * Subscribe to messages in a chat (real-time)
+ * Subscribe to messages in a chat (real-time) with optional pagination
  * @param {string} chatId - Chat ID
  * @param {Function} callback - Callback function to receive messages
+ * @param {number} maxMessages - Maximum number of messages to load (default: all)
  * @returns {Function} - Unsubscribe function
  */
-export const subscribeToMessages = (chatId, callback) => {
+export const subscribeToMessages = (chatId, callback, maxMessages = null) => {
   try {
     const messagesRef = collection(db, 'chats', chatId, 'messages');
-    const q = query(messagesRef, orderBy('timestamp', 'asc'));
+    
+    // Build query with optional limit for performance
+    let q;
+    if (maxMessages) {
+      // For pagination: get most recent N messages, then reverse to display oldest first
+      q = query(messagesRef, orderBy('timestamp', 'desc'), limit(maxMessages));
+    } else {
+      // Load all messages (original behavior)
+      q = query(messagesRef, orderBy('timestamp', 'asc'));
+    }
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const messages = [];
@@ -248,6 +259,12 @@ export const subscribeToMessages = (chatId, callback) => {
           ...doc.data(),
         });
       });
+      
+      // If limited, reverse to show oldest first (chronological order)
+      if (maxMessages) {
+        messages.reverse();
+      }
+      
       callback(messages);
     });
     
