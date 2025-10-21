@@ -30,9 +30,15 @@ import { db } from '../config/firebase';
  * /chats/{chatId}/messages/{messageId}
  *   - senderId: string
  *   - senderEmail: string
- *   - text: string
+ *   - text: string (for text messages)
+ *   - photo: object (for photo messages)
+ *     - url: string - Firebase Storage download URL
+ *     - width: number - Image width
+ *     - height: number - Image height
+ *   - type: 'text' | 'photo' - Message type
  *   - timestamp: serverTimestamp
  *   - readBy: [userId1, userId2, ...] - array of users who read the message
+ *   - senderName: string - Sender's display name/nickname (optional)
  */
 
 /**
@@ -119,7 +125,7 @@ export const createOrGetChat = async (memberIds, metadata = {}) => {
 };
 
 /**
- * Send a message in a chat
+ * Send a text message in a chat
  * @param {string} chatId - Chat ID
  * @param {string} senderId - Sender's user ID
  * @param {string} senderEmail - Sender's email
@@ -136,6 +142,7 @@ export const sendMessage = async (chatId, senderId, senderEmail, text, senderNam
         senderId,
         senderEmail,
         text,
+        type: 'text',
         timestamp: serverTimestamp(),
         readBy: [senderId], // Sender has "read" their own message
       };
@@ -162,6 +169,59 @@ export const sendMessage = async (chatId, senderId, senderEmail, text, senderNam
       return messageRef.id;
     } catch (error) {
       console.error('Error sending message:', error);
+      throw error;
+    }
+  });
+};
+
+/**
+ * Send a photo message in a chat
+ * @param {string} chatId - Chat ID
+ * @param {string} senderId - Sender's user ID
+ * @param {string} senderEmail - Sender's email
+ * @param {Object} photo - Photo data
+ * @param {string} photo.url - Firebase Storage download URL
+ * @param {number} photo.width - Image width
+ * @param {number} photo.height - Image height
+ * @param {string} senderName - Sender's display name/nickname (optional)
+ * @returns {Promise<string>} - Message ID
+ */
+export const sendPhotoMessage = async (chatId, senderId, senderEmail, photo, senderName = null) => {
+  return retryOperation(async () => {
+    try {
+      const messagesRef = collection(db, 'chats', chatId, 'messages');
+      
+      const messageData = {
+        senderId,
+        senderEmail,
+        photo,
+        type: 'photo',
+        timestamp: serverTimestamp(),
+        readBy: [senderId], // Sender has "read" their own message
+      };
+
+      // Add sender name if provided
+      if (senderName) {
+        messageData.senderName = senderName;
+      }
+      
+      const messageRef = await addDoc(messagesRef, messageData);
+      
+      // Update chat's last message (show "📷 Photo" as preview)
+      const chatRef = doc(db, 'chats', chatId);
+      await setDoc(
+        chatRef,
+        {
+          lastMessage: '📷 Photo',
+          lastMessageTime: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      
+      console.log('Photo message sent:', messageRef.id);
+      return messageRef.id;
+    } catch (error) {
+      console.error('Error sending photo message:', error);
       throw error;
     }
   });
@@ -367,4 +427,44 @@ export const markMessagesAsRead = async (chatId, messageIds, userId) => {
     console.error('Error marking messages as read:', error);
     // Don't throw - read receipts are not critical
   }
+};
+
+/**
+ * Update chat metadata (name, icon, notes) for group chats
+ * @param {string} chatId - Chat ID
+ * @param {Object} metadata - Metadata to update
+ * @param {string} [metadata.name] - Group chat name
+ * @param {string} [metadata.icon] - Group chat icon (emoji)
+ * @param {string} [metadata.notes] - Private notes about the group
+ * @returns {Promise<void>}
+ */
+export const updateChatMetadata = async (chatId, metadata) => {
+  return retryOperation(async () => {
+    try {
+      const chatRef = doc(db, 'chats', chatId);
+      
+      // Only update provided fields
+      const updateData = {
+        updatedAt: serverTimestamp(),
+      };
+      
+      if (metadata.name !== undefined) {
+        updateData.name = metadata.name;
+      }
+      
+      if (metadata.icon !== undefined) {
+        updateData.icon = metadata.icon;
+      }
+      
+      if (metadata.notes !== undefined) {
+        updateData.notes = metadata.notes;
+      }
+      
+      await setDoc(chatRef, updateData, { merge: true });
+      console.log('Chat metadata updated:', chatId, updateData);
+    } catch (error) {
+      console.error('Error updating chat metadata:', error);
+      throw error;
+    }
+  });
 };

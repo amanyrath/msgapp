@@ -12,17 +12,31 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import { useNotifications } from '../context/NotificationContext';
 import {
   createOrGetChat,
   sendMessage,
+  sendPhotoMessage,
   subscribeToMessages,
   subscribeToUsers,
   markMessagesAsRead,
 } from '../utils/firestore';
-import { subscribeToMultiplePresence, getPresenceText, isUserOnline } from '../utils/presence';
+import { 
+  subscribeToMultiplePresence, 
+  getPresenceText, 
+  isUserOnline,
+  setUserTyping,
+  clearUserTyping,
+  subscribeToTypingUsers,
+  getTypingText
+} from '../utils/presence';
+import { processPhoto } from '../utils/photos';
+import PhotoMessage from '../components/PhotoMessage';
+import PhotoPicker from '../components/PhotoPicker';
+import TypingIndicator from '../components/TypingIndicator';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -36,9 +50,14 @@ export default function ChatScreen({ route, navigation }) {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(!route?.params?.chatId);
+  const [sendingPhoto, setSendingPhoto] = useState(false);
   const flatListRef = useRef(null);
   const [userProfiles, setUserProfiles] = useState([]);
   const [presenceData, setPresenceData] = useState({});
+  
+  // Typing indicators
+  const [typingUsers, setTypingUsers] = useState([]);
+  const typingTimeoutRef = useRef(null);
 
   // Initialize chat based on navigation params or fallback to personal chat
   useEffect(() => {
@@ -135,6 +154,21 @@ export default function ChatScreen({ route, navigation }) {
     };
   }, [chatMembers, user?.uid]);
 
+  // Subscribe to typing indicators
+  useEffect(() => {
+    if (!chatId) return;
+
+    const unsubscribe = subscribeToTypingUsers(chatId, (typingUserIds) => {
+      setTypingUsers(typingUserIds);
+    });
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [chatId]);
+
   // Subscribe to chat metadata changes (name, icon, notes)
   useEffect(() => {
     if (!chatId) return;
@@ -191,8 +225,40 @@ export default function ChatScreen({ route, navigation }) {
     }
   };
 
+  // Handle typing detection
+  const handleTyping = (text) => {
+    setNewMessage(text);
+    
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
+    if (text.trim() && chatId && user) {
+      // Set typing status
+      setUserTyping(user.uid, chatId);
+      
+      // Clear typing after 3 seconds of inactivity
+      typingTimeoutRef.current = setTimeout(() => {
+        clearUserTyping(user.uid, chatId);
+      }, 3000);
+    } else if (chatId && user) {
+      // Clear typing immediately if input is empty
+      clearUserTyping(user.uid, chatId);
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !chatId) return;
+
+    // Clear typing indicator immediately when sending
+    if (user && chatId) {
+      clearUserTyping(user.uid, chatId);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+    }
 
     const messageText = newMessage.trim();
     const tempId = `temp-${Date.now()}`;
@@ -205,6 +271,7 @@ export default function ChatScreen({ route, navigation }) {
     const optimisticMessage = {
       id: tempId,
       text: messageText,
+      type: 'text',
       senderId: user.uid,
       senderEmail: user.email,
       senderName,
@@ -224,6 +291,54 @@ export default function ChatScreen({ route, navigation }) {
       Alert.alert('Error', 'Failed to send message: ' + error.message);
       // Remove optimistic message on failure
       setMessages((prev) => prev.filter((msg) => msg.id !== tempId));
+    }
+  };
+
+  const handleSendPhoto = async (source) => {
+    if (!chatId || sendingPhoto) return;
+
+    setSendingPhoto(true);
+
+    try {
+      // Get current user's profile for nickname
+      const currentUserProfile = userProfiles.find(p => p.id === user.uid);
+      const senderName = currentUserProfile?.displayName || currentUserProfile?.nickname || user.email?.split('@')[0] || 'User';
+
+      // Process photo (select, resize, upload)
+      const photoData = await processPhoto(source, chatId, user.uid);
+      
+      if (!photoData) {
+        // User cancelled photo selection
+        setSendingPhoto(false);
+        return;
+      }
+
+      const tempId = `temp-photo-${Date.now()}`;
+
+      // Optimistic UI update - add photo message immediately
+      const optimisticMessage = {
+        id: tempId,
+        type: 'photo',
+        photo: photoData,
+        senderId: user.uid,
+        senderEmail: user.email,
+        senderName,
+        timestamp: { toDate: () => new Date() },
+        sending: true,
+      };
+
+      setMessages((prev) => [...prev, optimisticMessage]);
+      scrollToBottom();
+
+      // Send photo message to Firestore
+      await sendPhotoMessage(chatId, user.uid, user.email, photoData, senderName);
+      
+      console.log('Photo message sent successfully');
+    } catch (error) {
+      console.error('Error sending photo:', error);
+      Alert.alert('Error', 'Failed to send photo: ' + error.message);
+    } finally {
+      setSendingPhoto(false);
     }
   };
 
@@ -339,6 +454,62 @@ export default function ChatScreen({ route, navigation }) {
       }
     }
 
+    // Render photo messages differently
+    if (item.type === 'photo' && item.photo) {
+      return (
+        <View
+          style={[
+            styles.messageContainer,
+            isMyMessage ? styles.myMessageContainer : styles.theirMessageContainer,
+          ]}
+        >
+          <View
+            style={[
+              styles.photoMessageContainer,
+              isMyMessage ? styles.myPhotoMessage : styles.theirPhotoMessage,
+              item.sending && styles.sendingMessage,
+            ]}
+          >
+            {!isMyMessage && chatMembers && chatMembers.length > 2 && (
+              <Text style={styles.senderName}>{senderName}</Text>
+            )}
+            <PhotoMessage 
+              photo={item.photo}
+              isOwnMessage={isMyMessage}
+              maxWidth={220}
+            />
+            <View style={styles.messageFooter}>
+              <Text
+                style={[
+                  styles.timeText,
+                  isMyMessage ? styles.myTimeText : styles.theirTimeText,
+                ]}
+              >
+                {formatTime(item.timestamp)}
+              </Text>
+              {isMyMessage && (
+                <Text
+                  style={[
+                    styles.readIndicator,
+                    isMyMessage ? styles.myTimeText : styles.theirTimeText,
+                  ]}
+                >
+                  {item.sending ? '○' : readIndicator}
+                </Text>
+              )}
+            </View>
+            {sendingPhoto && item.sending && (
+              <View style={styles.sendingOverlay}>
+                <ActivityIndicator size="small" color="#007AFF" />
+                <Text style={styles.sendingText}>Sending photo...</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      );
+    }
+
+    // Render text messages
     return (
       <View
         style={[
@@ -458,13 +629,18 @@ export default function ChatScreen({ route, navigation }) {
             />
 
             <View style={styles.inputContainer}>
+              <PhotoPicker 
+                onPhotoSelected={handleSendPhoto}
+                disabled={sendingPhoto || isOffline}
+              />
               <TextInput
                 style={styles.input}
                 placeholder="Type a message..."
                 value={newMessage}
-                onChangeText={setNewMessage}
+                onChangeText={handleTyping}
                 multiline
                 maxLength={1000}
+                editable={!sendingPhoto}
               />
               <TouchableOpacity
                 style={[
@@ -472,7 +648,7 @@ export default function ChatScreen({ route, navigation }) {
                   !newMessage.trim() && styles.sendButtonDisabled,
                 ]}
                 onPress={handleSendMessage}
-                disabled={!newMessage.trim()}
+                disabled={!newMessage.trim() || sendingPhoto}
               >
                 <Text style={styles.sendButtonText}>Send</Text>
               </TouchableOpacity>
@@ -614,6 +790,38 @@ const styles = StyleSheet.create({
   },
   readIndicator: {
     fontSize: 11,
+    fontWeight: '600',
+  },
+  photoMessageContainer: {
+    maxWidth: '75%',
+    padding: 4,
+    borderRadius: 20,
+    position: 'relative',
+  },
+  myPhotoMessage: {
+    backgroundColor: 'transparent',
+    alignSelf: 'flex-end',
+  },
+  theirPhotoMessage: {
+    backgroundColor: 'transparent', 
+    alignSelf: 'flex-start',
+  },
+  sendingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 16,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  sendingText: {
+    color: 'white',
+    fontSize: 14,
     fontWeight: '600',
   },
   inputContainer: {

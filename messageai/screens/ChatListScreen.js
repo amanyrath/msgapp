@@ -18,7 +18,6 @@ export default function ChatListScreen({ navigation }) {
   const { isOffline } = useNetwork();
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [userProfiles, setUserProfiles] = useState([]);
   const [presenceData, setPresenceData] = useState({});
 
@@ -33,7 +32,6 @@ export default function ChatListScreen({ navigation }) {
     const unsubscribe = subscribeToUserChats(user.uid, (chatList) => {
       setChats(chatList);
       setLoading(false);
-      setRefreshing(false);
     });
 
     return () => {
@@ -83,12 +81,6 @@ export default function ChatListScreen({ navigation }) {
       }
     };
   }, [chats, user?.uid]);
-
-  const handleRefresh = () => {
-    setRefreshing(true);
-    // Data updates automatically via subscription; just end the indicator
-    setTimeout(() => setRefreshing(false), 400);
-  };
 
   const handleSignOut = async () => {
     await signOut();
@@ -264,8 +256,6 @@ export default function ChatListScreen({ navigation }) {
           data={chats}
           keyExtractor={(item) => item.id}
           renderItem={renderChatItem}
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>No chats yet.</Text>

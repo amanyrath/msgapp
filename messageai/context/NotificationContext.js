@@ -11,80 +11,122 @@ export function NotificationProvider({ children }) {
   const { user } = useAuth();
   const [activeChat, setActiveChat] = useState(null);
   const processedMessages = useRef(new Set());
-  const chatsRef = useRef([]);
+  const messageSubscriptions = useRef(new Map()); // Track subscriptions to clean them up
+  const notificationTimeout = useRef(null);
 
   // Track the currently active chat so we don't show notifications for it
   const setActiveChatId = (chatId) => {
+    console.log('🔔 Active chat changed:', chatId);
     setActiveChat(chatId);
   };
 
   // Subscribe to all user's chats and listen for new messages
   useEffect(() => {
     if (!user?.uid) {
+      // Clean up existing subscriptions
+      messageSubscriptions.current.forEach((unsubscribe) => unsubscribe());
+      messageSubscriptions.current.clear();
       return;
     }
 
+    console.log('🔔 Setting up notification subscriptions for user:', user.uid);
+
     // Subscribe to user's chats
     const unsubscribeChats = subscribeToUserChats(user.uid, (chats) => {
-      chatsRef.current = chats;
+      console.log('🔔 Chats updated, setting up message listeners for', chats.length, 'chats');
+      
+      // Clean up old message subscriptions
+      messageSubscriptions.current.forEach((unsubscribe) => unsubscribe());
+      messageSubscriptions.current.clear();
 
       // For each chat, subscribe to its most recent message
       chats.forEach((chat) => {
         const messagesRef = collection(db, 'chats', chat.id, 'messages');
         const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(1));
 
-        onSnapshot(q, (snapshot) => {
+        const unsubscribeMessages = onSnapshot(q, (snapshot) => {
           snapshot.docChanges().forEach((change) => {
             if (change.type === 'added') {
               const message = { id: change.doc.id, ...change.doc.data() };
+              const messageKey = `${chat.id}-${message.id}`;
+
+              // Always mark as processed first to prevent duplicates
+              if (processedMessages.current.has(messageKey)) {
+                return; // Already processed this message
+              }
+              processedMessages.current.add(messageKey);
+
+              console.log('🔔 New message detected:', {
+                chatId: chat.id,
+                messageId: message.id,
+                senderId: message.senderId,
+                activeChat: activeChat,
+                isFromCurrentUser: message.senderId === user.uid,
+                isActiveChat: chat.id === activeChat
+              });
 
               // Don't show notification if:
               // 1. Message is from current user
               // 2. Chat is currently active
-              // 3. Message was already processed (initial load)
-              const messageKey = `${chat.id}-${message.id}`;
-              
-              if (
-                message.senderId !== user.uid &&
-                chat.id !== activeChat &&
-                !processedMessages.current.has(messageKey)
-              ) {
-                processedMessages.current.add(messageKey);
-
-                // Determine notification title
-                let title = 'New Message';
-                if (chat.type === 'group' || chat.members?.length > 2) {
-                  // Group chat: show sender name + chat name
-                  title = message.senderName || 'Someone';
-                } else {
-                  // Direct chat: show sender name
-                  title = message.senderName || 'Someone';
+              if (message.senderId !== user.uid && chat.id !== activeChat) {
+                // Add small delay to prevent rapid-fire notifications
+                if (notificationTimeout.current) {
+                  clearTimeout(notificationTimeout.current);
                 }
+                
+                notificationTimeout.current = setTimeout(() => {
+                  // Double-check conditions after delay
+                  if (message.senderId !== user.uid && chat.id !== activeChat) {
+                    // Determine notification title
+                    let title = 'New Message';
+                    if (chat.type === 'group' || chat.members?.length > 2) {
+                      title = message.senderName || 'Someone';
+                    } else {
+                      title = message.senderName || 'Someone';
+                    }
 
-                // Show notification
-                showMessageNotification({
-                  title,
-                  body: message.text,
-                  chatId: chat.id,
-                  chatData: chat,
-                });
+                    // Show notification
+                    showMessageNotification({
+                      title,
+                      body: message.text,
+                      chatId: chat.id,
+                      chatData: chat,
+                    });
 
-                console.log(`📬 Notification shown for message from ${message.senderName}`);
+                    console.log(`📬 Notification shown: "${title}: ${message.text}"`);
+                  } else {
+                    console.log('🔕 Notification skipped (conditions changed during delay)');
+                  }
+                }, 100); // 100ms delay to prevent duplicates
               } else {
-                // Mark as processed even if we don't show notification
-                // (to avoid showing it when chat becomes inactive)
-                processedMessages.current.add(messageKey);
+                console.log('🔕 Notification skipped:', {
+                  reason: message.senderId === user.uid ? 'own message' : 'active chat'
+                });
               }
             }
           });
         });
+
+        // Store the unsubscribe function
+        messageSubscriptions.current.set(chat.id, unsubscribeMessages);
       });
     });
 
     return () => {
+      console.log('🔔 Cleaning up notification subscriptions');
       unsubscribeChats();
+      messageSubscriptions.current.forEach((unsubscribe) => unsubscribe());
+      messageSubscriptions.current.clear();
+      if (notificationTimeout.current) {
+        clearTimeout(notificationTimeout.current);
+      }
     };
-  }, [user, activeChat]);
+  }, [user?.uid]); // Removed activeChat from dependencies
+
+  // Separate effect to handle active chat changes without restarting subscriptions
+  useEffect(() => {
+    console.log('🔔 Active chat updated:', activeChat);
+  }, [activeChat]);
 
   // Clean up processed messages periodically to prevent memory leak
   useEffect(() => {

@@ -2,9 +2,11 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getDatabase } from 'firebase/database';
+import { getStorage } from 'firebase/storage';
 import { connectAuthEmulator } from 'firebase/auth';
 import { connectFirestoreEmulator } from 'firebase/firestore';
 import { connectDatabaseEmulator } from 'firebase/database';
+import { connectStorageEmulator } from 'firebase/storage';
 import { ref, set } from 'firebase/database';
 
 // Firebase configuration from Firebase Console
@@ -26,11 +28,13 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
+export const storage = getStorage(app);
 
 console.log('✅ Firebase initialized:', {
   auth: !!auth,
   firestore: !!db,
   rtdb: !!rtdb,
+  storage: !!storage,
   databaseURL: firebaseConfig.databaseURL
 });
 
@@ -58,6 +62,13 @@ if (USE_EMULATORS) {
     console.log('✅ RTDB emulator connected:', !!rtdb);
   } catch (e) {
     console.log('RTDB emulator already connected or error:', e.message);
+  }
+
+  try {
+    connectStorageEmulator(storage, '127.0.0.1', 9199);
+    console.log('✅ Storage emulator connected');
+  } catch (e) {
+    console.log('Storage emulator already connected or error:', e.message);
   }
 
   console.log('✅ All Firebase Emulators connected');
