@@ -23,6 +23,8 @@ import {
   markMessagesAsRead,
 } from '../utils/firestore';
 import { subscribeToMultiplePresence, getPresenceText, isUserOnline } from '../utils/presence';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 export default function ChatScreen({ route, navigation }) {
   const { user } = useAuth();
@@ -132,6 +134,26 @@ export default function ChatScreen({ route, navigation }) {
       }
     };
   }, [chatMembers, user?.uid]);
+
+  // Subscribe to chat metadata changes (name, icon, notes)
+  useEffect(() => {
+    if (!chatId) return;
+
+    const chatRef = doc(db, 'chats', chatId);
+    const unsubscribe = onSnapshot(chatRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setChatMetadata((prev) => ({
+          ...prev,
+          name: data.name,
+          icon: data.icon,
+          notes: data.notes,
+        }));
+      }
+    });
+
+    return () => unsubscribe();
+  }, [chatId]);
 
   // Scroll to bottom when messages change
   const scrollToBottom = () => {
@@ -373,12 +395,27 @@ export default function ChatScreen({ route, navigation }) {
             </TouchableOpacity>
           )}
         </View>
-        <View style={styles.headerTitleWrapper}>
+        <TouchableOpacity 
+          style={styles.headerTitleWrapper}
+          onPress={() => {
+            if (chatId) {
+              navigation.navigate('ChatSettings', {
+                chatId,
+                chatData: {
+                  name: chatMetadata?.name || chatTitle,
+                  icon: chatMetadata?.icon,
+                  notes: chatMetadata?.notes,
+                  members: chatMembers,
+                },
+              });
+            }
+          }}
+        >
           <Text style={styles.title}>{chatTitle}</Text>
           {chatPresenceText && (
             <Text style={styles.presenceText}>{chatPresenceText}</Text>
           )}
-        </View>
+        </TouchableOpacity>
         <View style={styles.headerSide} />
       </View>
 

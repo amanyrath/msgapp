@@ -17,6 +17,7 @@ import ChatScreen from './screens/ChatScreen';
 import ChatListScreen from './screens/ChatListScreen';
 import NewChatScreen from './screens/NewChatScreen';
 import ProfileScreen from './screens/ProfileScreen';
+import ChatSettingsScreen from './screens/ChatSettingsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -67,6 +68,7 @@ function Navigation() {
             <Stack.Screen name="ChatList" component={ChatListScreen} />
             <Stack.Screen name="NewChat" component={NewChatScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
+            <Stack.Screen name="ChatSettings" component={ChatSettingsScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
           </>
         ) : (

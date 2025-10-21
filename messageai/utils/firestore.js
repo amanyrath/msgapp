@@ -19,6 +19,8 @@ import { db } from '../config/firebase';
  * 
  * /chats/{chatId}
  *   - name: string - Static chat name (e.g., "John & Jane" or "Team Chat")
+ *   - icon: string - Chat icon emoji (e.g., "💬" or "🎮")
+ *   - notes: string - Private notes about the chat (optional)
  *   - members: [userId1, userId2, ...]
  *   - createdAt: timestamp
  *   - lastMessage: string

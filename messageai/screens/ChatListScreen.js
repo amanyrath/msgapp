@@ -158,6 +158,11 @@ export default function ChatListScreen({ navigation }) {
   };
 
   const getChatIcon = (chat) => {
+    // Use custom chat icon if set
+    if (chat.icon) {
+      return chat.icon;
+    }
+
     const members = chat.members || [];
     const otherMembers = members.filter((id) => id !== user?.uid);
 
