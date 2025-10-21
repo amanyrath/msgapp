@@ -30,6 +30,45 @@ import { db } from '../config/firebase';
  */
 
 /**
+ * Retry helper for Firestore operations
+ * @param {Function} operation - The async operation to retry
+ * @param {number} maxRetries - Maximum number of retry attempts
+ * @param {number} delay - Delay between retries in ms
+ * @returns {Promise} - Result of the operation
+ */
+const retryOperation = async (operation, maxRetries = 3, delay = 1000) => {
+  let lastError;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      
+      // Don't retry on permission errors or invalid arguments
+      if (error.code === 'permission-denied' || 
+          error.code === 'invalid-argument' ||
+          error.code === 'not-found') {
+        throw error;
+      }
+      
+      // If it's the last attempt, throw the error
+      if (attempt === maxRetries) {
+        console.error(`Operation failed after ${maxRetries + 1} attempts:`, error);
+        throw error;
+      }
+      
+      // Wait before retrying (exponential backoff)
+      const waitTime = delay * Math.pow(2, attempt);
+      console.log(`Retry attempt ${attempt + 1}/${maxRetries} after ${waitTime}ms...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+  }
+  
+  throw lastError;
+};
+
+/**
  * Create or get a chat between users
  * @param {Array<string>} memberIds - Array of user IDs
  * @param {Object} metadata - Additional fields to set when creating a chat
@@ -82,35 +121,37 @@ export const createOrGetChat = async (memberIds, metadata = {}) => {
  * @returns {Promise<string>} - Message ID
  */
 export const sendMessage = async (chatId, senderId, senderEmail, text) => {
-  try {
-    const messagesRef = collection(db, 'chats', chatId, 'messages');
-    
-    const messageData = {
-      senderId,
-      senderEmail,
-      text,
-      timestamp: serverTimestamp(),
-    };
-    
-    const messageRef = await addDoc(messagesRef, messageData);
-    
-    // Update chat's last message
-    const chatRef = doc(db, 'chats', chatId);
-    await setDoc(
-      chatRef,
-      {
-        lastMessage: text,
-        lastMessageTime: serverTimestamp(),
-      },
-      { merge: true }
-    );
-    
-    console.log('Message sent:', messageRef.id);
-    return messageRef.id;
-  } catch (error) {
-    console.error('Error sending message:', error);
-    throw error;
-  }
+  return retryOperation(async () => {
+    try {
+      const messagesRef = collection(db, 'chats', chatId, 'messages');
+      
+      const messageData = {
+        senderId,
+        senderEmail,
+        text,
+        timestamp: serverTimestamp(),
+      };
+      
+      const messageRef = await addDoc(messagesRef, messageData);
+      
+      // Update chat's last message
+      const chatRef = doc(db, 'chats', chatId);
+      await setDoc(
+        chatRef,
+        {
+          lastMessage: text,
+          lastMessageTime: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      
+      console.log('Message sent:', messageRef.id);
+      return messageRef.id;
+    } catch (error) {
+      console.error('Error sending message:', error);
+      throw error;
+    }
+  });
 };
 
 /**

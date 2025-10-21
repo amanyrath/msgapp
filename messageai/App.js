@@ -3,6 +3,8 @@ import { StyleSheet, ActivityIndicator, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { NetworkProvider } from './context/NetworkContext';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Import screens
 import LoginScreen from './screens/LoginScreen';
@@ -53,10 +55,14 @@ function Navigation() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Navigation />
-      <StatusBar style="auto" />
-    </AuthProvider>
+    <ErrorBoundary>
+      <NetworkProvider>
+        <AuthProvider>
+          <Navigation />
+          <StatusBar style="auto" />
+        </AuthProvider>
+      </NetworkProvider>
+    </ErrorBoundary>
   );
 }
 

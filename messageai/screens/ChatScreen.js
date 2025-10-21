@@ -13,6 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useNetwork } from '../context/NetworkContext';
 import {
   createOrGetChat,
   sendMessage,
@@ -22,6 +23,7 @@ import {
 
 export default function ChatScreen({ route, navigation }) {
   const { user } = useAuth();
+  const { isOffline } = useNetwork();
   const [chatId, setChatId] = useState(route?.params?.chatId ?? null);
   const [chatMembers, setChatMembers] = useState(route?.params?.members ?? []);
   const [chatMetadata, setChatMetadata] = useState(route?.params?.metadata ?? {});
@@ -261,6 +263,12 @@ export default function ChatScreen({ route, navigation }) {
         <View style={styles.headerSide} />
       </View>
 
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>📵 Offline - Messages will send when reconnected</Text>
+        </View>
+      )}
+
       <KeyboardAvoidingView
         style={styles.content}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -324,6 +332,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+  },
+  offlineBanner: {
+    backgroundColor: '#FFA500',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  offlineText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   title: {
     fontSize: 20,

@@ -9,10 +9,12 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useNetwork } from '../context/NetworkContext';
 import { subscribeToUserChats, subscribeToUsers } from '../utils/firestore';
 
 export default function ChatListScreen({ navigation }) {
   const { user, signOut } = useAuth();
+  const { isOffline } = useNetwork();
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -157,6 +159,12 @@ export default function ChatListScreen({ navigation }) {
         </View>
       </View>
 
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>📵 You're offline</Text>
+        </View>
+      )}
+
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
@@ -198,6 +206,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: '#F1F1F1',
+  },
+  offlineBanner: {
+    backgroundColor: '#FFA500',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  offlineText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   title: {
     fontSize: 24,
