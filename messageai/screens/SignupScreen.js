@@ -73,7 +73,8 @@ export default function SignupScreen({ navigation }) {
             value={password}
             onChangeText={setPassword}
             secureTextEntry
-            autoComplete="password"
+            autoComplete="off"
+            textContentType="none"
             editable={!isLoading}
           />
 
@@ -83,7 +84,8 @@ export default function SignupScreen({ navigation }) {
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry
-            autoComplete="password"
+            autoComplete="off"
+            textContentType="none"
             editable={!isLoading}
           />
 
