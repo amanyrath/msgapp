@@ -8,6 +8,21 @@
 
 ### What We Just Completed (October 21, 2025)
 
+**User Profile Enhancement: Nicknames & Icons** ✅ (Just completed!)
+- Signup screen now requires nickname and custom icon (emoji)
+- User profiles store nickname and icon fields
+- Chat list displays user icons for 1-on-1 chats
+- New chat screen shows user avatars with icons
+- Messages include sender nicknames
+- Presence system includes nickname and icon data
+- Icons displayed throughout app (emoji avatars)
+- Login screen unchanged (email/password only)
+- All profile data visible to authenticated users
+- **NEW**: Profile Settings screen for editing nickname/icon
+- **NEW**: Settings button (⚙️) in chat list header
+- **NEW**: Users can update profile at any time
+- **NEW**: Changes propagate immediately to presence system
+
 **PR #3-5: Complete Messaging System** ✅
 - Firestore schema with chats and messages collections
 - Real-time messaging with optimistic UI
@@ -184,9 +199,10 @@
 - `messageai/utils/presence.js` - RTDB presence system
 
 **Screens**:
-- `messageai/screens/ChatListScreen.js` - Chat list with avatars, presence, unread badges
+- `messageai/screens/ChatListScreen.js` - Chat list with avatars, presence, settings button
 - `messageai/screens/ChatScreen.js` - Messages with read receipts, presence header
 - `messageai/screens/NewChatScreen.js` - Multi-user chat creation
+- `messageai/screens/ProfileScreen.js` - Profile settings (edit nickname/icon, sign out)
 
 **Context**:
 - `messageai/context/AuthContext.js` - Auth + presence tracking

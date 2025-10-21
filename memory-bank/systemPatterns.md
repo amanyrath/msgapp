@@ -327,8 +327,11 @@ UI updates across all devices
 {
   uid: string,           // User ID
   email: string,         // Email address
-  displayName: string,   // Display name (optional)
-  createdAt: timestamp   // Account creation time
+  displayName: string,   // Display name (set to nickname)
+  nickname: string,      // User's chosen nickname (NEW)
+  icon: string,          // User's emoji avatar (NEW)
+  createdAt: timestamp,  // Account creation time
+  updatedAt: timestamp   // Last profile update
 }
 ```
 
@@ -348,10 +351,11 @@ UI updates across all devices
 ```javascript
 {
   senderId: string,      // User who sent message
+  senderEmail: string,   // Sender's email
+  senderName: string,    // Sender's nickname (NEW - persisted for history)
   text: string,          // Message content
   timestamp: timestamp,  // Server timestamp
-  readBy: [userId, ...], // Array of users who read it
-  senderName: string     // Display name (for group chats)
+  readBy: [userId, ...]  // Array of users who read it
 }
 ```
 
@@ -363,7 +367,9 @@ UI updates across all devices
   state: 'online' | 'offline',  // Current status
   lastChanged: timestamp,        // Last status change
   email: string,                 // User email
-  displayName: string            // Display name
+  displayName: string,           // Display name (nickname)
+  nickname: string,              // User's nickname (NEW)
+  icon: string                   // User's emoji avatar (NEW)
 }
 ```
 

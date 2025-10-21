@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { createUserProfile } from '../utils/firestore';
+import { setUserOnline } from '../utils/presence';
 
 export default function ProfileScreen({ navigation }) {
   const { user, signOut } = useAuth();
@@ -79,9 +80,21 @@ export default function ProfileScreen({ navigation }) {
         icon: icon.trim(),
       });
 
+      // Update presence with new profile data
+      try {
+        await setUserOnline(user.uid, {
+          email: user.email,
+          displayName: nickname.trim(),
+          nickname: nickname.trim(),
+          icon: icon.trim(),
+        });
+      } catch (presenceError) {
+        console.log('Could not update presence:', presenceError.message);
+      }
+
       Alert.alert(
         'Success',
-        'Profile updated! Changes will appear in new messages.',
+        'Profile updated! Your new nickname and icon will be visible immediately.',
         [
           {
             text: 'OK',

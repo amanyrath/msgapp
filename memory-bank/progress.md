@@ -254,6 +254,59 @@
 
 ---
 
+### ✅ User Profile Enhancement: Nicknames & Icons
+**Status**: Complete  
+**Completed**: October 21, 2025
+
+#### What Works
+1. **Signup Flow**:
+   - Added nickname field (required, max 20 chars)
+   - Added icon field (emoji, required, max 2 chars)
+   - Fields positioned after email, before password
+   - Validation ensures both fields are filled
+   - Profile created with nickname and icon on signup
+
+2. **User Profiles**:
+   - nickname field stored in Firestore
+   - icon field stored in Firestore (emoji)
+   - displayName set to nickname
+   - All data accessible to authenticated users
+   - Presence system includes nickname and icon
+
+3. **UI Updates**:
+   - Chat list shows user icons for 1-on-1 chats
+   - Group chats show 👥 icon
+   - Personal notes show 📝 icon
+   - New chat screen displays user avatars with icons
+   - Messages include sender nicknames
+   - Avatar styling optimized for emoji display
+
+4. **Data Persistence**:
+   - Messages store sender nickname for historical accuracy
+   - Presence includes nickname and icon
+   - Profile data synced to all clients
+   - Backward compatible with existing users
+
+#### Files Modified
+- `messageai/screens/SignupScreen.js`
+- `messageai/context/AuthContext.js`
+- `messageai/screens/ChatListScreen.js`
+- `messageai/screens/NewChatScreen.js`
+- `messageai/screens/ChatScreen.js`
+- `messageai/utils/firestore.js`
+- `messageai/screens/ProfileScreen.js` (NEW)
+- `messageai/App.js` (added Profile screen to navigation)
+
+#### Profile Edit Feature
+- Profile Settings screen accessible via ⚙️ button in header
+- Users can update nickname and icon at any time
+- Changes save to Firestore and update presence immediately
+- Works for both new and existing users
+- Includes validation, loading states, and error handling
+- Sign out functionality moved to Profile screen
+
+---
+
 ## Work In Progress
 
 ### No Active Work

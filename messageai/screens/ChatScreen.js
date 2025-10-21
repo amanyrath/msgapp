@@ -229,10 +229,14 @@ export default function ChatScreen({ route, navigation }) {
   }, [chatMetadata?.memberDisplayNames, chatMembers]);
 
   const getDisplayName = (memberId, fallbackEmail) => {
+    // Don't show current user's name
+    if (memberId === user?.uid) return null;
+    
     const metaName = metadataNameMap[memberId];
     if (metaName) return metaName;
     const profile = userProfileMap[memberId];
     if (profile?.displayName) return profile.displayName;
+    if (profile?.nickname) return profile.nickname;
     if (profile?.email) return profile.email;
     if (fallbackEmail) return fallbackEmail;
     return memberId;
@@ -242,8 +246,8 @@ export default function ChatScreen({ route, navigation }) {
     if (!chatMembers?.length) return 'Chat';
     const others = chatMembers.filter((id) => id !== user?.uid);
     if (others.length === 0) return 'Personal Notes';
-    const names = others.map((id) => getDisplayName(id));
-    return names.join(', ');
+    const names = others.map((id) => getDisplayName(id)).filter(Boolean);
+    return names.length > 0 ? names.join(', ') : 'Chat';
   }, [chatMembers, metadataNameMap, userProfileMap, user?.uid]);
 
   const chatPresenceText = useMemo(() => {
