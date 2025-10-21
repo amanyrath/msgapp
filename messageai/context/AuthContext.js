@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { createUserProfile } from '../utils/firestore';
+import { setUserOnline, setUserOffline } from '../utils/presence';
 
 const AuthContext = createContext({});
 
@@ -17,11 +18,18 @@ export const AuthProvider = ({ children }) => {
 
   // Listen to auth state changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       setLoading(false);
+      
       if (user) {
         console.log('User signed in:', user.email);
+        // Set user presence as online
+        const displayName = user.email?.split('@')[0] || 'User';
+        await setUserOnline(user.uid, {
+          email: user.email,
+          displayName,
+        });
       } else {
         console.log('User signed out');
       }
@@ -83,6 +91,12 @@ export const AuthProvider = ({ children }) => {
   const signOut = async () => {
     try {
       setError(null);
+      
+      // Set user as offline before signing out
+      if (user?.uid) {
+        await setUserOffline(user.uid);
+      }
+      
       await firebaseSignOut(auth);
       console.log('Sign out successful');
       return { success: true };

@@ -20,6 +20,7 @@ import {
   subscribeToMessages,
   subscribeToUsers,
 } from '../utils/firestore';
+import { subscribeToMultiplePresence, getPresenceText, isUserOnline } from '../utils/presence';
 
 export default function ChatScreen({ route, navigation }) {
   const { user } = useAuth();
@@ -32,6 +33,7 @@ export default function ChatScreen({ route, navigation }) {
   const [loading, setLoading] = useState(!route?.params?.chatId);
   const flatListRef = useRef(null);
   const [userProfiles, setUserProfiles] = useState([]);
+  const [presenceData, setPresenceData] = useState({});
 
   // Initialize chat based on navigation params or fallback to personal chat
   useEffect(() => {
@@ -83,6 +85,24 @@ export default function ChatScreen({ route, navigation }) {
       }
     };
   }, []);
+
+  // Subscribe to presence for chat members
+  useEffect(() => {
+    if (!chatMembers || chatMembers.length === 0) return;
+
+    const otherMembers = chatMembers.filter((id) => id !== user?.uid);
+    if (otherMembers.length === 0) return;
+
+    const unsubscribe = subscribeToMultiplePresence(otherMembers, (data) => {
+      setPresenceData(data);
+    });
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [chatMembers, user?.uid]);
 
   // Scroll to bottom when messages change
   const scrollToBottom = () => {
@@ -192,6 +212,24 @@ export default function ChatScreen({ route, navigation }) {
     return names.join(', ');
   }, [chatMembers, metadataNameMap, userProfileMap, user?.uid]);
 
+  const chatPresenceText = useMemo(() => {
+    if (!chatMembers?.length) return '';
+    const others = chatMembers.filter((id) => id !== user?.uid);
+    if (others.length === 0) return '';
+    
+    // For 1-on-1 chats, show the user's presence
+    if (others.length === 1) {
+      const presence = presenceData[others[0]];
+      return getPresenceText(presence);
+    }
+    
+    // For group chats, show count of online members
+    const onlineCount = others.filter((id) => isUserOnline(presenceData[id])).length;
+    if (onlineCount === 0) return '';
+    if (onlineCount === others.length) return 'All members online';
+    return `${onlineCount} online`;
+  }, [chatMembers, presenceData, user?.uid]);
+
   const formatTime = (timestamp) => {
     if (!timestamp?.toDate) return '';
     const date = timestamp.toDate();
@@ -259,6 +297,9 @@ export default function ChatScreen({ route, navigation }) {
         </View>
         <View style={styles.headerTitleWrapper}>
           <Text style={styles.title}>{chatTitle}</Text>
+          {chatPresenceText && (
+            <Text style={styles.presenceText}>{chatPresenceText}</Text>
+          )}
         </View>
         <View style={styles.headerSide} />
       </View>
@@ -348,6 +389,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#000',
+  },
+  presenceText: {
+    fontSize: 13,
+    color: '#34C759',
+    marginTop: 2,
   },
   headerSide: {
     width: 72,

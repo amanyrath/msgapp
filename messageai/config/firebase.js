@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import { getDatabase } from 'firebase/database';
 
 // Firebase configuration from Firebase Console
 const firebaseConfig = {
@@ -10,7 +11,8 @@ const firebaseConfig = {
   storageBucket: "msgapp-74ca2.firebasestorage.app",
   messagingSenderId: "978847373297",
   appId: "1:978847373297:web:dd410f81784dfda4d09650",
-  measurementId: "G-1HL5WZWVKH"
+  measurementId: "G-1HL5WZWVKH",
+  databaseURL: "https://msgapp-74ca2-default-rtdb.firebaseio.com"
 };
 
 // Initialize Firebase
@@ -19,6 +21,7 @@ const app = initializeApp(firebaseConfig);
 // Initialize Firebase services
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const rtdb = getDatabase(app);
 
 // Enable offline persistence
 enableIndexedDbPersistence(db).catch((err) => {

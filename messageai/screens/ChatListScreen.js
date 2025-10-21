@@ -11,6 +11,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import { subscribeToUserChats, subscribeToUsers } from '../utils/firestore';
+import { subscribeToMultiplePresence, isUserOnline } from '../utils/presence';
 
 export default function ChatListScreen({ navigation }) {
   const { user, signOut } = useAuth();
@@ -19,6 +20,7 @@ export default function ChatListScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [userProfiles, setUserProfiles] = useState([]);
+  const [presenceData, setPresenceData] = useState({});
 
   useEffect(() => {
     if (!user?.uid) {
@@ -52,6 +54,35 @@ export default function ChatListScreen({ navigation }) {
       }
     };
   }, []);
+
+  // Subscribe to presence for all users in chats
+  useEffect(() => {
+    if (chats.length === 0) return;
+
+    // Get all unique user IDs from all chats
+    const allUserIds = new Set();
+    chats.forEach((chat) => {
+      chat.members?.forEach((memberId) => {
+        if (memberId !== user?.uid) {
+          allUserIds.add(memberId);
+        }
+      });
+    });
+
+    const userIdsArray = Array.from(allUserIds);
+    
+    if (userIdsArray.length === 0) return;
+
+    const unsubscribe = subscribeToMultiplePresence(userIdsArray, (data) => {
+      setPresenceData(data);
+    });
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [chats, user?.uid]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -122,6 +153,12 @@ export default function ChatListScreen({ navigation }) {
 
   const renderChatItem = ({ item }) => {
     const chatTitle = formatMemberNames(item);
+    
+    // Check if any other members are online
+    const otherMembers = item.members?.filter((id) => id !== user?.uid) || [];
+    const anyOnline = otherMembers.some((memberId) => 
+      isUserOnline(presenceData[memberId])
+    );
 
     return (
       <TouchableOpacity
@@ -129,6 +166,14 @@ export default function ChatListScreen({ navigation }) {
         onPress={() => handleOpenChat(item)}
       >
         <View style={styles.chatRow}>
+          <View style={styles.chatAvatarContainer}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {chatTitle[0]?.toUpperCase() || '?'}
+              </Text>
+            </View>
+            {anyOnline && <View style={styles.onlineIndicator} />}
+          </View>
           <View style={styles.chatTextContainer}>
             <Text style={styles.chatTitle}>{chatTitle}</Text>
             <Text style={styles.chatSnippet} numberOfLines={1}>
@@ -255,6 +300,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  chatAvatarContainer: {
+    position: 'relative',
+    marginRight: 12,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  onlineIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#34C759',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   chatTextContainer: {
     flex: 1,
