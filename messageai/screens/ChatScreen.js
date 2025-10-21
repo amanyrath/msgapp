@@ -265,15 +265,22 @@ export default function ChatScreen({ route, navigation }) {
   };
 
   const chatTitle = useMemo(() => {
-    // Use static chat name if available
+    if (!chatMembers?.length) return 'Chat';
+    const others = chatMembers.filter((id) => id !== user?.uid);
+    if (others.length === 0) return 'Personal Notes';
+    
+    // For 1-on-1 chats (2 members), always use the other user's name
+    if (chatMembers.length === 2) {
+      const names = others.map((id) => getDisplayName(id)).filter(Boolean);
+      return names.length > 0 ? names[0] : 'Chat';
+    }
+    
+    // For group chats (3+ members), use custom name if available
     if (chatMetadata?.name) {
       return chatMetadata.name;
     }
     
-    // Fallback to dynamic name generation
-    if (!chatMembers?.length) return 'Chat';
-    const others = chatMembers.filter((id) => id !== user?.uid);
-    if (others.length === 0) return 'Personal Notes';
+    // Fallback to dynamic name generation for groups
     const names = others.map((id) => getDisplayName(id)).filter(Boolean);
     return names.length > 0 ? names.join(' & ') : 'Chat';
   }, [chatMembers, chatMetadata?.name, metadataNameMap, userProfileMap, user?.uid]);
@@ -398,7 +405,8 @@ export default function ChatScreen({ route, navigation }) {
         <TouchableOpacity 
           style={styles.headerTitleWrapper}
           onPress={() => {
-            if (chatId) {
+            // Only allow settings for group chats (3+ members)
+            if (chatId && chatMembers && chatMembers.length >= 3) {
               navigation.navigate('ChatSettings', {
                 chatId,
                 chatData: {
@@ -410,6 +418,7 @@ export default function ChatScreen({ route, navigation }) {
               });
             }
           }}
+          disabled={!chatMembers || chatMembers.length < 3}
         >
           <Text style={styles.title}>{chatTitle}</Text>
           {chatPresenceText && (

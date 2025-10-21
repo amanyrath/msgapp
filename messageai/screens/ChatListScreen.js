@@ -122,12 +122,6 @@ export default function ChatListScreen({ navigation }) {
   }, [userProfiles]);
 
   const formatMemberNames = (chat) => {
-    // Use static chat name if available
-    if (chat.name) {
-      return chat.name;
-    }
-
-    // Fallback to dynamic name generation
     const members = chat.members || [];
     const otherMembers = members.filter((id) => id !== user?.uid);
 
@@ -144,6 +138,17 @@ export default function ChatListScreen({ navigation }) {
       return 'Unknown';
     });
 
+    // For 1-on-1 chats (2 members), always use the other user's name
+    if (members.length === 2) {
+      return names[0] || 'Chat';
+    }
+
+    // For group chats (3+ members), use custom name if available
+    if (chat.name) {
+      return chat.name;
+    }
+
+    // Fallback to joined names for groups
     return names.join(' & ');
   };
 
@@ -158,11 +163,6 @@ export default function ChatListScreen({ navigation }) {
   };
 
   const getChatIcon = (chat) => {
-    // Use custom chat icon if set
-    if (chat.icon) {
-      return chat.icon;
-    }
-
     const members = chat.members || [];
     const otherMembers = members.filter((id) => id !== user?.uid);
 
@@ -170,13 +170,18 @@ export default function ChatListScreen({ navigation }) {
       return '📝'; // Personal notes
     }
 
-    // For 1-on-1 chats, show the other user's icon
-    if (otherMembers.length === 1) {
+    // For 1-on-1 chats (2 members), always show the other user's icon
+    if (members.length === 2) {
       const profile = userProfileMap[otherMembers[0]];
       return profile?.icon || '👤';
     }
 
-    // For group chats, show group icon
+    // For group chats (3+ members), use custom icon if set
+    if (chat.icon) {
+      return chat.icon;
+    }
+
+    // Default group icon
     return '👥';
   };
 

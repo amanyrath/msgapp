@@ -85,21 +85,22 @@ export default function NewChatScreen({ navigation }) {
       return '';
     });
 
-    // Generate static chat name
-    const otherMembers = selectedIds.map((id) => {
-      const profile = userMap[id];
-      return profile?.displayName || profile?.nickname || profile?.email || 'User';
-    });
-    
-    const chatName = otherMembers.join(' & ');
+    // Generate static chat name (only for group chats with 3+ members)
     const chatType = selectedIds.length > 1 ? 'group' : 'direct';
-
     const metadata = {
-      name: chatName,
       type: chatType,
       memberDisplayNames,
       memberEmails,
     };
+
+    // Only set custom name for group chats (3+ members total)
+    if (memberIds.length >= 3) {
+      const otherMembers = selectedIds.map((id) => {
+        const profile = userMap[id];
+        return profile?.displayName || profile?.nickname || profile?.email || 'User';
+      });
+      metadata.name = otherMembers.join(' & ');
+    }
 
     try {
       setCreating(true);
