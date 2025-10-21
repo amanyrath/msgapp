@@ -5,6 +5,10 @@
         ".read": true,
         ".write": "$uid === auth.uid"
       }
+    },
+    "test": {
+      ".read": true,
+      ".write": true
     }
   }
 }

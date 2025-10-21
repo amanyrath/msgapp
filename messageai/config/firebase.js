@@ -2,6 +2,10 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getDatabase } from 'firebase/database';
+import { connectAuthEmulator } from 'firebase/auth';
+import { connectFirestoreEmulator } from 'firebase/firestore';
+import { connectDatabaseEmulator } from 'firebase/database';
+import { ref, set } from 'firebase/database';
 
 // Firebase configuration from Firebase Console
 const firebaseConfig = {
@@ -30,33 +34,54 @@ console.log('✅ Firebase initialized:', {
   databaseURL: firebaseConfig.databaseURL
 });
 
-// Enable offline persistence (only once)
-if (getApps().length === 1) {
-  enableIndexedDbPersistence(db).catch((err) => {
-    if (err.code === 'failed-precondition') {
-      // Multiple tabs open, persistence can only be enabled in one tab at a time.
-      console.warn('Offline persistence failed: Multiple tabs open');
-    } else if (err.code === 'unimplemented') {
-      // The current browser doesn't support persistence
-      console.warn('Offline persistence not supported in this browser');
-    } else {
-      console.error('Error enabling offline persistence:', err);
-    }
-  });
+// Connect to Firebase Emulator (for local development)
+// Set to false for production
+const USE_EMULATORS = true;
+
+if (USE_EMULATORS) {
+  try {
+    connectAuthEmulator(auth, 'http://127.0.0.1:9099');
+    console.log('✅ Auth emulator connected');
+  } catch (e) {
+    console.log('Auth emulator already connected or error:', e.message);
+  }
+
+  try {
+    connectFirestoreEmulator(db, '127.0.0.1', 8080);
+    console.log('✅ Firestore emulator connected');
+  } catch (e) {
+    console.log('Firestore emulator already connected or error:', e.message);
+  }
+
+  try {
+    connectDatabaseEmulator(rtdb, '127.0.0.1', 9000);
+    console.log('✅ RTDB emulator connected:', !!rtdb);
+  } catch (e) {
+    console.log('RTDB emulator already connected or error:', e.message);
+  }
+
+  console.log('✅ All Firebase Emulators connected');
+
+  // Test RTDB connection
+  setTimeout(() => {
+    const testRef = ref(rtdb, 'test/connection');
+    set(testRef, { timestamp: Date.now(), message: 'RTDB is working!' })
+      .then(() => console.log('✅✅✅ RTDB TEST WRITE SUCCESSFUL!'))
+      .catch((err) => console.error('❌ RTDB TEST WRITE FAILED:', err));
+  }, 1000);
+} else {
+  // Enable offline persistence (only for production, not emulators)
+  if (getApps().length === 1) {
+    enableIndexedDbPersistence(db).catch((err) => {
+      if (err.code === 'failed-precondition') {
+        console.warn('Offline persistence failed: Multiple tabs open');
+      } else if (err.code === 'unimplemented') {
+        console.warn('Offline persistence not supported in this browser');
+      } else {
+        console.error('Error enabling offline persistence:', err);
+      }
+    });
+  }
 }
 
-// Connect to Firebase Emulator (for local development)
-// Uncomment these lines if using Firebase Emulator:
-/*
-import { connectAuthEmulator } from 'firebase/auth';
-import { connectFirestoreEmulator } from 'firebase/firestore';
-import { connectDatabaseEmulator } from 'firebase/database';
-
-connectAuthEmulator(auth, 'http://127.0.0.1:9099');
-connectFirestoreEmulator(db, '127.0.0.1', 8080);
-connectDatabaseEmulator(rtdb, '127.0.0.1', 9000);
-console.log('✅ Connected to Firebase Emulators');
-*/
-
 export default app;
-

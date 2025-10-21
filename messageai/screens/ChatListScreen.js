@@ -121,22 +121,17 @@ export default function ChatListScreen({ navigation }) {
     const members = chat.members || [];
     const otherMembers = members.filter((id) => id !== user?.uid);
 
-    const metadataNames = chat.memberDisplayNames || [];
-    const namesFromMetadata = metadataNames.filter((_, index) => members[index] !== user?.uid);
-
-    const names =
-      namesFromMetadata.length === otherMembers.length && namesFromMetadata.length > 0
-        ? namesFromMetadata
-        : otherMembers.map((id) => {
-            const profile = userProfileMap[id];
-            if (profile?.displayName) return profile.displayName;
-            if (profile?.email) return profile.email;
-            return id;
-          });
-
-    if (names.length === 0) {
+    if (otherMembers.length === 0) {
       return 'Personal Notes';
     }
+
+    // Get names from user profiles (real-time data)
+    const names = otherMembers.map((id) => {
+      const profile = userProfileMap[id];
+      if (profile?.displayName) return profile.displayName;
+      if (profile?.email) return profile.email;
+      return 'Unknown';
+    });
 
     return names.join(', ');
   };
