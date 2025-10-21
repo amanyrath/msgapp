@@ -1,0 +1,192 @@
+import {
+  collection,
+  addDoc,
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  serverTimestamp,
+  onSnapshot,
+} from 'firebase/firestore';
+import { db } from '../config/firebase';
+
+/**
+ * Firestore Schema:
+ * 
+ * /chats/{chatId}
+ *   - members: [userId1, userId2, ...]
+ *   - createdAt: timestamp
+ *   - lastMessage: string
+ *   - lastMessageTime: timestamp
+ * 
+ * /chats/{chatId}/messages/{messageId}
+ *   - senderId: string
+ *   - senderEmail: string
+ *   - text: string
+ *   - timestamp: serverTimestamp
+ */
+
+/**
+ * Create or get a chat between users
+ * @param {Array<string>} memberIds - Array of user IDs
+ * @returns {Promise<string>} - Chat ID
+ */
+export const createOrGetChat = async (memberIds) => {
+  try {
+    // Sort member IDs for consistent chat lookup
+    const sortedMembers = [...memberIds].sort();
+    
+    // Check if chat already exists
+    const chatsRef = collection(db, 'chats');
+    const q = query(chatsRef, where('members', '==', sortedMembers));
+    const querySnapshot = await getDocs(q);
+    
+    if (!querySnapshot.empty) {
+      // Chat exists, return the ID
+      return querySnapshot.docs[0].id;
+    }
+    
+    // Create new chat
+    const chatData = {
+      members: sortedMembers,
+      createdAt: serverTimestamp(),
+      lastMessage: '',
+      lastMessageTime: serverTimestamp(),
+    };
+    
+    const chatRef = await addDoc(chatsRef, chatData);
+    console.log('Created new chat:', chatRef.id);
+    return chatRef.id;
+  } catch (error) {
+    console.error('Error creating/getting chat:', error);
+    throw error;
+  }
+};
+
+/**
+ * Send a message in a chat
+ * @param {string} chatId - Chat ID
+ * @param {string} senderId - Sender's user ID
+ * @param {string} senderEmail - Sender's email
+ * @param {string} text - Message text
+ * @returns {Promise<string>} - Message ID
+ */
+export const sendMessage = async (chatId, senderId, senderEmail, text) => {
+  try {
+    const messagesRef = collection(db, 'chats', chatId, 'messages');
+    
+    const messageData = {
+      senderId,
+      senderEmail,
+      text,
+      timestamp: serverTimestamp(),
+    };
+    
+    const messageRef = await addDoc(messagesRef, messageData);
+    
+    // Update chat's last message
+    const chatRef = doc(db, 'chats', chatId);
+    await setDoc(
+      chatRef,
+      {
+        lastMessage: text,
+        lastMessageTime: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    
+    console.log('Message sent:', messageRef.id);
+    return messageRef.id;
+  } catch (error) {
+    console.error('Error sending message:', error);
+    throw error;
+  }
+};
+
+/**
+ * Subscribe to messages in a chat (real-time)
+ * @param {string} chatId - Chat ID
+ * @param {Function} callback - Callback function to receive messages
+ * @returns {Function} - Unsubscribe function
+ */
+export const subscribeToMessages = (chatId, callback) => {
+  try {
+    const messagesRef = collection(db, 'chats', chatId, 'messages');
+    const q = query(messagesRef, orderBy('timestamp', 'asc'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const messages = [];
+      snapshot.forEach((doc) => {
+        messages.push({
+          id: doc.id,
+          ...doc.data(),
+        });
+      });
+      callback(messages);
+    });
+    
+    return unsubscribe;
+  } catch (error) {
+    console.error('Error subscribing to messages:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get all chats for a user
+ * @param {string} userId - User ID
+ * @returns {Promise<Array>} - Array of chats
+ */
+export const getUserChats = async (userId) => {
+  try {
+    const chatsRef = collection(db, 'chats');
+    const q = query(
+      chatsRef,
+      where('members', 'array-contains', userId),
+      orderBy('lastMessageTime', 'desc')
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const chats = [];
+    
+    querySnapshot.forEach((doc) => {
+      chats.push({
+        id: doc.id,
+        ...doc.data(),
+      });
+    });
+    
+    return chats;
+  } catch (error) {
+    console.error('Error getting user chats:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get chat details
+ * @param {string} chatId - Chat ID
+ * @returns {Promise<Object>} - Chat data
+ */
+export const getChat = async (chatId) => {
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatRef);
+    
+    if (chatSnap.exists()) {
+      return {
+        id: chatSnap.id,
+        ...chatSnap.data(),
+      };
+    } else {
+      throw new Error('Chat not found');
+    }
+  } catch (error) {
+    console.error('Error getting chat:', error);
+    throw error;
+  }
+};
+
