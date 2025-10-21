@@ -10,6 +10,7 @@ import {
   orderBy,
   serverTimestamp,
   onSnapshot,
+  arrayUnion,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -27,6 +28,7 @@ import { db } from '../config/firebase';
  *   - senderEmail: string
  *   - text: string
  *   - timestamp: serverTimestamp
+ *   - readBy: [userId1, userId2, ...] - array of users who read the message
  */
 
 /**
@@ -130,6 +132,7 @@ export const sendMessage = async (chatId, senderId, senderEmail, text) => {
         senderEmail,
         text,
         timestamp: serverTimestamp(),
+        readBy: [senderId], // Sender has "read" their own message
       };
       
       const messageRef = await addDoc(messagesRef, messageData);
@@ -318,5 +321,40 @@ export const getChat = async (chatId) => {
   } catch (error) {
     console.error('Error getting chat:', error);
     throw error;
+  }
+};
+
+/**
+ * Mark messages as read by a user
+ * @param {string} chatId - Chat ID
+ * @param {Array<string>} messageIds - Array of message IDs to mark as read
+ * @param {string} userId - User ID marking messages as read
+ */
+export const markMessagesAsRead = async (chatId, messageIds, userId) => {
+  if (!messageIds || messageIds.length === 0) return;
+  
+  try {
+    const batch = [];
+    
+    for (const messageId of messageIds) {
+      const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
+      
+      // Use arrayUnion to add userId to readBy array (avoids duplicates)
+      const updatePromise = setDoc(
+        messageRef,
+        {
+          readBy: arrayUnion(userId),
+        },
+        { merge: true }
+      );
+      
+      batch.push(updatePromise);
+    }
+    
+    await Promise.all(batch);
+    console.log(`Marked ${messageIds.length} messages as read`);
+  } catch (error) {
+    console.error('Error marking messages as read:', error);
+    // Don't throw - read receipts are not critical
   }
 };

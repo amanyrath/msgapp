@@ -19,6 +19,7 @@ import {
   sendMessage,
   subscribeToMessages,
   subscribeToUsers,
+  markMessagesAsRead,
 } from '../utils/firestore';
 import { subscribeToMultiplePresence, getPresenceText, isUserOnline } from '../utils/presence';
 
@@ -69,10 +70,22 @@ export default function ChatScreen({ route, navigation }) {
       // Scroll to bottom when new messages arrive
       setLoading(false);
       setTimeout(() => scrollToBottom(), 100);
+      
+      // Mark unread messages as read
+      if (user?.uid) {
+        const unreadMessages = msgs.filter(
+          msg => msg.senderId !== user.uid && !(msg.readBy || []).includes(user.uid)
+        );
+        
+        if (unreadMessages.length > 0) {
+          const unreadIds = unreadMessages.map(msg => msg.id);
+          markMessagesAsRead(chatId, unreadIds, user.uid);
+        }
+      }
     });
 
     return () => unsubscribe();
-  }, [chatId]);
+  }, [chatId, user?.uid]);
 
   useEffect(() => {
     const unsubscribe = subscribeToUsers((profiles) => {
@@ -244,6 +257,28 @@ export default function ChatScreen({ route, navigation }) {
     const isMyMessage = item.senderId === user.uid;
     const senderName = getDisplayName(item.senderId, item.senderEmail);
 
+    // Calculate read status for sender's messages
+    let readIndicator = '';
+    if (isMyMessage && !item.sending) {
+      const readBy = item.readBy || [];
+      const otherMembers = (chatMembers || []).filter(id => id !== user.uid);
+      const readByOthers = readBy.filter(id => id !== user.uid);
+      
+      if (otherMembers.length === 0) {
+        // Personal chat with self - always read
+        readIndicator = '✓✓';
+      } else if (readByOthers.length === 0) {
+        // Not read by anyone yet - single checkmark (sent)
+        readIndicator = '✓';
+      } else if (readByOthers.length === otherMembers.length) {
+        // Read by ALL other members - double checkmark
+        readIndicator = '✓✓';
+      } else {
+        // Read by some but not all - single checkmark
+        readIndicator = '✓';
+      }
+    }
+
     return (
       <View
         style={[
@@ -258,7 +293,7 @@ export default function ChatScreen({ route, navigation }) {
             item.sending && styles.sendingMessage,
           ]}
         >
-          {!isMyMessage && (
+          {!isMyMessage && chatMembers && chatMembers.length > 2 && (
             <Text style={styles.senderName}>{senderName}</Text>
           )}
           <Text
@@ -269,14 +304,26 @@ export default function ChatScreen({ route, navigation }) {
           >
             {item.text}
           </Text>
-          <Text
-            style={[
-              styles.timeText,
-              isMyMessage ? styles.myTimeText : styles.theirTimeText,
-            ]}
-          >
-            {formatTime(item.timestamp)} {item.sending && '●'}
-          </Text>
+          <View style={styles.messageFooter}>
+            <Text
+              style={[
+                styles.timeText,
+                isMyMessage ? styles.myTimeText : styles.theirTimeText,
+              ]}
+            >
+              {formatTime(item.timestamp)}
+            </Text>
+            {isMyMessage && (
+              <Text
+                style={[
+                  styles.readIndicator,
+                  isMyMessage ? styles.myTimeText : styles.theirTimeText,
+                ]}
+              >
+                {item.sending ? '○' : readIndicator}
+              </Text>
+            )}
+          </View>
         </View>
       </View>
     );
@@ -472,15 +519,25 @@ const styles = StyleSheet.create({
   theirMessageText: {
     color: '#000',
   },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    gap: 4,
+  },
   timeText: {
     fontSize: 11,
-    marginTop: 4,
   },
   myTimeText: {
     color: 'rgba(255, 255, 255, 0.7)',
   },
   theirTimeText: {
     color: '#666',
+  },
+  readIndicator: {
+    fontSize: 11,
+    fontWeight: '600',
   },
   inputContainer: {
     flexDirection: 'row',

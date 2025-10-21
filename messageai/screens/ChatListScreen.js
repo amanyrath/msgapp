@@ -155,6 +155,9 @@ export default function ChatListScreen({ navigation }) {
       isUserOnline(presenceData[memberId])
     );
 
+    // Calculate unread count (placeholder - would need to subscribe to messages for accurate count)
+    const unreadCount = item.unreadCount || 0;
+
     return (
       <TouchableOpacity
         style={styles.chatItem}
@@ -175,10 +178,17 @@ export default function ChatListScreen({ navigation }) {
               {item.lastMessage || 'No messages yet'}
             </Text>
           </View>
-          <View>
+          <View style={styles.chatMetaContainer}>
             <Text style={styles.chatTime}>
               {formatTimestamp(item.lastMessageTime)}
             </Text>
+            {unreadCount > 0 && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadText}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       </TouchableOpacity>
@@ -338,9 +348,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
   },
+  chatMetaContainer: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
   chatTime: {
     fontSize: 12,
     color: '#9CA3AF',
+  },
+  unreadBadge: {
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   emptyContainer: {
     flexGrow: 1,
