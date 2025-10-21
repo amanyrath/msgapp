@@ -36,7 +36,7 @@ console.log('✅ Firebase initialized:', {
 
 // Connect to Firebase Emulator (for local development)
 // Set to false for production
-const USE_EMULATORS = true;
+const USE_EMULATORS = false;
 
 if (USE_EMULATORS) {
   try {
