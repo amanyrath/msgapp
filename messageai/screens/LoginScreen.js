@@ -61,8 +61,8 @@ export default function LoginScreen({ navigation }) {
             onChangeText={setPassword}
             secureTextEntry
             autoComplete="off"
-            textContentType="none"
-            passwordRules=""
+            textContentType="oneTimeCode"
+            importantForAutofill="no"
             editable={!isLoading}
           />
 

@@ -59,10 +59,14 @@ export async function registerForPushNotifications() {
  */
 export async function showMessageNotification({ title, body, chatId, chatData }) {
   try {
+    // Ensure title and body are valid strings
+    const safeTitle = title || 'New Message';
+    const safeBody = body || 'New message';
+    
     await Notifications.scheduleNotificationAsync({
       content: {
-        title,
-        body,
+        title: safeTitle,
+        body: safeBody,
         sound: 'default',
         data: { chatId, chatData },
       },

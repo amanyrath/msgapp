@@ -8,6 +8,9 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "hosting": {
     "public": "public",
     "ignore": [
@@ -35,6 +38,9 @@
     },
     "database": {
       "port": 9000
+    },
+    "storage": {
+      "port": 9199
     },
     "hosting": {
       "port": 5003

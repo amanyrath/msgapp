@@ -58,6 +58,11 @@ export default function ChatScreen({ route, navigation }) {
   // Typing indicators
   const [typingUsers, setTypingUsers] = useState([]);
   const typingTimeoutRef = useRef(null);
+  
+  // Filter out current user from typing users
+  const othersTypingUsers = useMemo(() => {
+    return typingUsers.filter(userId => userId !== user?.uid);
+  }, [typingUsers, user?.uid]);
 
   // Initialize chat based on navigation params or fallback to personal chat
   useEffect(() => {
@@ -168,6 +173,19 @@ export default function ChatScreen({ route, navigation }) {
       }
     };
   }, [chatId]);
+
+  // Cleanup typing timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      // Clear typing status on unmount
+      if (user && chatId) {
+        clearUserTyping(user.uid, chatId);
+      }
+    };
+  }, [user, chatId]);
 
   // Subscribe to chat metadata changes (name, icon, notes)
   useEffect(() => {
@@ -300,6 +318,13 @@ export default function ChatScreen({ route, navigation }) {
     setSendingPhoto(true);
 
     try {
+      console.log('📸 Starting photo send process:', {
+        source,
+        chatId,
+        userUid: user?.uid,
+        userEmail: user?.email
+      });
+
       // Get current user's profile for nickname
       const currentUserProfile = userProfiles.find(p => p.id === user.uid);
       const senderName = currentUserProfile?.displayName || currentUserProfile?.nickname || user.email?.split('@')[0] || 'User';
@@ -309,9 +334,12 @@ export default function ChatScreen({ route, navigation }) {
       
       if (!photoData) {
         // User cancelled photo selection
+        console.log('📷 Photo selection cancelled by user');
         setSendingPhoto(false);
         return;
       }
+
+      console.log('📷 Photo processed successfully:', photoData);
 
       const tempId = `temp-photo-${Date.now()}`;
 
@@ -331,11 +359,12 @@ export default function ChatScreen({ route, navigation }) {
       scrollToBottom();
 
       // Send photo message to Firestore
+      console.log('💾 Saving photo message to Firestore...');
       await sendPhotoMessage(chatId, user.uid, user.email, photoData, senderName);
       
-      console.log('Photo message sent successfully');
+      console.log('✅ Photo message sent successfully');
     } catch (error) {
-      console.error('Error sending photo:', error);
+      console.error('❌ Error sending photo:', error);
       Alert.alert('Error', 'Failed to send photo: ' + error.message);
     } finally {
       setSendingPhoto(false);
@@ -413,9 +442,12 @@ export default function ChatScreen({ route, navigation }) {
     
     // For group chats, show count of online members
     const onlineCount = others.filter((id) => isUserOnline(presenceData[id])).length;
+    const totalOthers = others.length;
+    
     if (onlineCount === 0) return '';
-    if (onlineCount === others.length) return 'All members online';
-    return `${onlineCount} online`;
+    if (onlineCount === 1) return '1 user online';
+    if (onlineCount === totalOthers) return `All ${totalOthers} users online`;
+    return `${onlineCount} of ${totalOthers} users online`;
   }, [chatMembers, presenceData, user?.uid]);
 
   const formatTime = (timestamp) => {
@@ -626,6 +658,12 @@ export default function ChatScreen({ route, navigation }) {
                 </Text>
               }
               onContentSizeChange={() => scrollToBottom()}
+            />
+
+            {/* Typing Indicator */}
+            <TypingIndicator 
+              visible={othersTypingUsers.length > 0} 
+              typingText={getTypingText(othersTypingUsers, userProfiles, user?.uid)} 
             />
 
             <View style={styles.inputContainer}>

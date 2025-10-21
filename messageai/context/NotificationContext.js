@@ -85,15 +85,23 @@ export function NotificationProvider({ children }) {
                       title = message.senderName || 'Someone';
                     }
 
+                    // Determine notification body based on message type
+                    let body = 'New message';
+                    if (message.type === 'photo' && message.photo) {
+                      body = '📷 Photo';
+                    } else if (message.text) {
+                      body = message.text;
+                    }
+
                     // Show notification
                     showMessageNotification({
                       title,
-                      body: message.text,
+                      body,
                       chatId: chat.id,
                       chatData: chat,
                     });
 
-                    console.log(`📬 Notification shown: "${title}: ${message.text}"`);
+                    console.log(`📬 Notification shown: "${title}: ${body}"`);
                   } else {
                     console.log('🔕 Notification skipped (conditions changed during delay)');
                   }

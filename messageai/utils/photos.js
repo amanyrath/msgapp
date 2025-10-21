@@ -2,6 +2,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../config/firebase';
+import Constants from 'expo-constants';
+import { processMockPhoto } from './mockPhotos';
 
 /**
  * Photo utilities for handling image selection, resizing, and upload
@@ -124,27 +126,56 @@ export const uploadPhoto = async (uri, chatId, userId) => {
     const timestamp = Date.now();
     const filename = `photos/${chatId}/${userId}_${timestamp}.jpg`;
     
+    console.log('🔍 Upload Debug Info:', {
+      uri,
+      chatId,
+      userId,
+      filename,
+      storageInstance: !!storage,
+      timestamp
+    });
+    
     // Create storage reference
     const storageRef = ref(storage, filename);
+    console.log('📁 Storage reference created:', storageRef.toString());
     
     // Convert URI to blob
+    console.log('📥 Fetching image from URI...');
     const response = await fetch(uri);
     const blob = await response.blob();
+    console.log('📦 Blob created:', {
+      size: blob.size,
+      type: blob.type
+    });
     
     // Upload to Firebase Storage
-    console.log('Uploading photo to:', filename);
+    console.log('☁️ Uploading to Firebase Storage:', filename);
     const uploadResult = await uploadBytes(storageRef, blob);
-    console.log('Photo uploaded successfully:', uploadResult.metadata.name);
+    console.log('✅ Photo uploaded successfully:', uploadResult.metadata.name);
     
     // Get download URL
+    console.log('🔗 Getting download URL...');
     const downloadURL = await getDownloadURL(storageRef);
-    console.log('Photo download URL:', downloadURL);
+    console.log('🎉 Photo download URL:', downloadURL);
     
     return downloadURL;
   } catch (error) {
-    console.error('Error uploading photo:', error);
+    console.error('❌ Error uploading photo:', error);
+    console.error('❌ Error details:', {
+      code: error.code,
+      message: error.message,
+      name: error.name
+    });
     throw new Error('Failed to upload photo: ' + error.message);
   }
+};
+
+/**
+ * Check if running in Expo Go
+ * @returns {boolean} True if running in Expo Go
+ */
+const isExpoGo = () => {
+  return Constants.appOwnership === null;
 };
 
 /**
@@ -156,6 +187,14 @@ export const uploadPhoto = async (uri, chatId, userId) => {
  */
 export const processPhoto = async (source, chatId, userId) => {
   try {
+    // Use mock photos in Expo Go
+    if (isExpoGo()) {
+      console.log('🎭 Using mock photos (running in Expo Go)');
+      return await processMockPhoto(source, chatId, userId);
+    }
+
+    console.log('📸 Using real camera/gallery (development/production build)');
+    
     // 1. Request permissions
     const permissions = await requestPhotoPermissions();
     

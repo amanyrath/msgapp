@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   SafeAreaView,
   StyleSheet,
@@ -10,7 +11,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
-import { subscribeToUserChats, subscribeToUsers } from '../utils/firestore';
+import { subscribeToUserChats, subscribeToUsers, deleteChat } from '../utils/firestore';
 import { subscribeToMultiplePresence, isUserOnline } from '../utils/presence';
 
 export default function ChatListScreen({ navigation }) {
@@ -20,6 +21,7 @@ export default function ChatListScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [userProfiles, setUserProfiles] = useState([]);
   const [presenceData, setPresenceData] = useState({});
+  const [deletingChats, setDeletingChats] = useState(new Set());
 
   useEffect(() => {
     if (!user?.uid) {
@@ -92,6 +94,60 @@ export default function ChatListScreen({ navigation }) {
 
   const handleProfile = () => {
     navigation.navigate('Profile');
+  };
+
+  const handleDeleteChat = (chat) => {
+    const chatTitle = formatMemberNames(chat);
+    
+    Alert.alert(
+      'Delete Chat',
+      `Are you sure you want to delete "${chatTitle}"?\n\nThis will permanently delete all messages and cannot be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Add chat to deleting set to show loading state
+              setDeletingChats(prev => new Set([...prev, chat.id]));
+              
+              // Delete the chat
+              await deleteChat(chat.id, user.uid);
+              
+              console.log('Chat deleted successfully:', chat.id);
+              
+              // Remove from deleting set
+              setDeletingChats(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(chat.id);
+                return newSet;
+              });
+              
+            } catch (error) {
+              console.error('Error deleting chat:', error);
+              
+              // Remove from deleting set
+              setDeletingChats(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(chat.id);
+                return newSet;
+              });
+              
+              // Show error alert
+              Alert.alert(
+                'Error',
+                `Failed to delete chat: ${error.message}`,
+                [{ text: 'OK' }]
+              );
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleOpenChat = (chat) => {
@@ -180,6 +236,7 @@ export default function ChatListScreen({ navigation }) {
   const renderChatItem = ({ item }) => {
     const chatTitle = formatMemberNames(item);
     const chatIcon = getChatIcon(item);
+    const isDeleting = deletingChats.has(item.id);
     
     // Check if any other members are online
     const otherMembers = item.members?.filter((id) => id !== user?.uid) || [];
@@ -192,8 +249,10 @@ export default function ChatListScreen({ navigation }) {
 
     return (
       <TouchableOpacity
-        style={styles.chatItem}
-        onPress={() => handleOpenChat(item)}
+        style={[styles.chatItem, isDeleting && styles.chatItemDeleting]}
+        onPress={() => !isDeleting && handleOpenChat(item)}
+        onLongPress={() => !isDeleting && handleDeleteChat(item)}
+        disabled={isDeleting}
       >
         <View style={styles.chatRow}>
           <View style={styles.chatAvatarContainer}>
@@ -211,15 +270,21 @@ export default function ChatListScreen({ navigation }) {
             </Text>
           </View>
           <View style={styles.chatMetaContainer}>
-            <Text style={styles.chatTime}>
-              {formatTimestamp(item.lastMessageTime)}
-            </Text>
-            {unreadCount > 0 && (
-              <View style={styles.unreadBadge}>
-                <Text style={styles.unreadText}>
-                  {unreadCount > 99 ? '99+' : unreadCount}
+            {isDeleting ? (
+              <ActivityIndicator size="small" color="#FF3B30" />
+            ) : (
+              <>
+                <Text style={styles.chatTime}>
+                  {formatTimestamp(item.lastMessageTime)}
                 </Text>
-              </View>
+                {unreadCount > 0 && (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadText}>
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </Text>
+                  </View>
+                )}
+              </>
             )}
           </View>
         </View>
@@ -335,6 +400,10 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F5F5F5',
+  },
+  chatItemDeleting: {
+    opacity: 0.5,
+    backgroundColor: '#FFEEEE',
   },
   chatRow: {
     flexDirection: 'row',

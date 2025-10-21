@@ -11,6 +11,8 @@ import {
   serverTimestamp,
   onSnapshot,
   arrayUnion,
+  deleteDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -464,6 +466,59 @@ export const updateChatMetadata = async (chatId, metadata) => {
       console.log('Chat metadata updated:', chatId, updateData);
     } catch (error) {
       console.error('Error updating chat metadata:', error);
+      throw error;
+    }
+  });
+};
+
+/**
+ * Delete a chat and all its messages
+ * @param {string} chatId - The chat ID to delete
+ * @param {string} userId - The user requesting the deletion (for permissions)
+ * @returns {Promise<boolean>} - True if successful
+ */
+export const deleteChat = async (chatId, userId) => {
+  return retryOperation(async () => {
+    try {
+      console.log('Deleting chat:', chatId, 'by user:', userId);
+      
+      // First verify the user is a member of this chat
+      const chatRef = doc(db, 'chats', chatId);
+      const chatDoc = await getDoc(chatRef);
+      
+      if (!chatDoc.exists()) {
+        throw new Error('Chat not found');
+      }
+      
+      const chatData = chatDoc.data();
+      if (!chatData.members || !chatData.members.includes(userId)) {
+        throw new Error('You are not a member of this chat');
+      }
+      
+      // Use a batch to delete everything atomically
+      const batch = writeBatch(db);
+      
+      // Delete all messages in the chat
+      const messagesRef = collection(db, 'chats', chatId, 'messages');
+      const messagesSnapshot = await getDocs(messagesRef);
+      
+      console.log(`Deleting ${messagesSnapshot.size} messages from chat ${chatId}`);
+      
+      messagesSnapshot.forEach((messageDoc) => {
+        batch.delete(messageDoc.ref);
+      });
+      
+      // Delete the chat document itself
+      batch.delete(chatRef);
+      
+      // Commit the batch
+      await batch.commit();
+      
+      console.log('Chat deleted successfully:', chatId);
+      return true;
+      
+    } catch (error) {
+      console.error('Error deleting chat:', error);
       throw error;
     }
   });

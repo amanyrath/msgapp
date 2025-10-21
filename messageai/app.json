@@ -16,7 +16,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.amanyrath.messageai",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "This app uses the camera to take photos for sharing in messages.",
+        "NSPhotoLibraryUsageDescription": "This app accesses your photo library to select photos for sharing in messages."
       }
     },
     "android": {
@@ -27,7 +29,10 @@
       "edgeToEdgeEnabled": true,
       "package": "com.amanyrath.messageai",
       "permissions": [
-        "RECEIVE_BOOT_COMPLETED"
+        "RECEIVE_BOOT_COMPLETED",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
       ]
     },
     "notification": {
@@ -55,9 +60,7 @@
         "projectId": "9a4e5f8e-5788-49cf-babe-ff1d1bf98ae6"
       }
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.0",
     "updates": {
       "url": "https://u.expo.dev/9a4e5f8e-5788-49cf-babe-ff1d1bf98ae6"
     }

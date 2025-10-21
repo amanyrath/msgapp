@@ -8,6 +8,7 @@ import {
   ActionSheetIOS,
   Platform
 } from 'react-native';
+import Constants from 'expo-constants';
 import { requestPhotoPermissions } from '../utils/photos';
 
 /**
@@ -18,7 +19,39 @@ export default function PhotoPicker({ onPhotoSelected, disabled = false }) {
     if (disabled) return;
 
     try {
-      // Request permissions first
+      const isExpoGo = Constants.appOwnership === null;
+      
+      if (isExpoGo) {
+        // Show mock photo options for Expo Go
+        if (Platform.OS === 'ios') {
+          ActionSheetIOS.showActionSheetWithOptions(
+            {
+              options: ['Cancel', '📸 Mock Camera Photo', '🖼️ Mock Gallery Photo'],
+              cancelButtonIndex: 0,
+            },
+            (buttonIndex) => {
+              if (buttonIndex === 1) {
+                onPhotoSelected('camera');
+              } else if (buttonIndex === 2) {
+                onPhotoSelected('library');
+              }
+            }
+          );
+        } else {
+          Alert.alert(
+            'Select Mock Photo',
+            'Testing photo functionality in Expo Go',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: '📸 Mock Camera Photo', onPress: () => onPhotoSelected('camera') },
+              { text: '🖼️ Mock Gallery Photo', onPress: () => onPhotoSelected('library') }
+            ]
+          );
+        }
+        return;
+      }
+
+      // Real photo functionality for development/production builds
       const permissions = await requestPhotoPermissions();
       
       if (!permissions.camera && !permissions.library) {
@@ -30,7 +63,6 @@ export default function PhotoPicker({ onPhotoSelected, disabled = false }) {
       }
 
       if (Platform.OS === 'ios') {
-        // Use iOS ActionSheet
         ActionSheetIOS.showActionSheetWithOptions(
           {
             options: ['Cancel', 'Take Photo', 'Choose from Library'],
@@ -38,14 +70,12 @@ export default function PhotoPicker({ onPhotoSelected, disabled = false }) {
           },
           (buttonIndex) => {
             if (buttonIndex === 1) {
-              // Take Photo
               if (permissions.camera) {
                 onPhotoSelected('camera');
               } else {
                 Alert.alert('Camera permission not granted');
               }
             } else if (buttonIndex === 2) {
-              // Choose from Library
               if (permissions.library) {
                 onPhotoSelected('library');
               } else {
@@ -55,7 +85,6 @@ export default function PhotoPicker({ onPhotoSelected, disabled = false }) {
           }
         );
       } else {
-        // Use Android Alert
         Alert.alert(
           'Select Photo',
           'Choose photo source',

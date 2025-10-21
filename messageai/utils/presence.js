@@ -145,29 +145,33 @@ export const subscribeToMultiplePresence = (userIds, callback) => {
  * @returns {string} - Human-readable status
  */
 export const getPresenceText = (presence) => {
-  if (!presence) return 'Offline';
+  if (!presence) return '';
   
+  // Only show "Active now" if user is actually online
   if (presence.state === 'online') {
     return 'Active now';
   }
   
+  // For offline users, show last activity time
   if (presence.lastChanged) {
     const lastChanged = new Date(presence.lastChanged);
     const now = new Date();
     const diffMs = now - lastChanged;
     const diffMins = Math.floor(diffMs / 60000);
     
-    if (diffMins < 1) return 'Active now';
+    if (diffMins < 1) return 'Active 1m ago';
     if (diffMins < 60) return `Active ${diffMins}m ago`;
     
     const diffHours = Math.floor(diffMins / 60);
     if (diffHours < 24) return `Active ${diffHours}h ago`;
     
     const diffDays = Math.floor(diffHours / 24);
-    return `Active ${diffDays}d ago`;
+    if (diffDays < 7) return `Active ${diffDays}d ago`;
+    
+    return 'Last seen over a week ago';
   }
   
-  return 'Offline';
+  return '';
 };
 
 /**
@@ -274,21 +278,16 @@ export const subscribeToTypingUsers = (chatId, callback) => {
 
 /**
  * Get typing indicator text for display
- * @param {Array<string>} typingUserIds - Array of typing user IDs
+ * @param {Array<string>} typingUserIds - Array of typing user IDs (already filtered)
  * @param {Object} userProfiles - User profiles object
- * @param {string} currentUserId - Current user ID (to exclude from display)
+ * @param {string} currentUserId - Current user ID (for reference, not used for filtering)
  * @returns {string} - Human-readable typing text
  */
 export const getTypingText = (typingUserIds, userProfiles, currentUserId) => {
   if (!typingUserIds || typingUserIds.length === 0) return '';
   
-  // Filter out current user
-  const othersTyping = typingUserIds.filter(userId => userId !== currentUserId);
-  
-  if (othersTyping.length === 0) return '';
-  
-  // Get names of typing users
-  const typingNames = othersTyping.map(userId => {
+  // Get names of typing users (no need to filter, already done by caller)
+  const typingNames = typingUserIds.map(userId => {
     const profile = userProfiles.find(p => p.uid === userId);
     return profile?.nickname || profile?.displayName || profile?.email || 'Someone';
   });

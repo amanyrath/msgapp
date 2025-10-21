@@ -239,8 +239,8 @@ export default function SignupScreen({ navigation }) {
             onChangeText={setPassword}
             secureTextEntry
             autoComplete="off"
-            textContentType="none"
-            passwordRules=""
+            textContentType="oneTimeCode"
+            importantForAutofill="no"
             editable={!isLoading}
           />
 
@@ -251,8 +251,8 @@ export default function SignupScreen({ navigation }) {
             onChangeText={setConfirmPassword}
             secureTextEntry
             autoComplete="off"
-            textContentType="none"
-            passwordRules=""
+            textContentType="oneTimeCode"
+            importantForAutofill="no"
             editable={!isLoading}
           />
 

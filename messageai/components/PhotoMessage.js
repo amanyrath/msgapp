@@ -6,12 +6,13 @@ import {
   Image,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   Modal,
   StatusBar,
-  Dimensions
+  Dimensions,
+  Animated
 } from 'react-native';
 import { getDisplayDimensions } from '../utils/photos';
+import ImagePlaceholder from './ImagePlaceholder';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -22,6 +23,7 @@ export default function PhotoMessage({ photo, isOwnMessage, maxWidth = 200 }) {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [showFullscreen, setShowFullscreen] = useState(false);
+  const fadeAnim = useState(new Animated.Value(0))[0];
 
   // Calculate display dimensions
   const displayDimensions = getDisplayDimensions(
@@ -33,6 +35,12 @@ export default function PhotoMessage({ photo, isOwnMessage, maxWidth = 200 }) {
   const handleImageLoad = () => {
     setIsLoading(false);
     setHasError(false);
+    // Fade in the image smoothly
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
   };
 
   const handleImageError = (error) => {
@@ -50,6 +58,7 @@ export default function PhotoMessage({ photo, isOwnMessage, maxWidth = 200 }) {
   const closeFullscreen = () => {
     setShowFullscreen(false);
   };
+
 
   if (!photo?.url) {
     return (
@@ -73,10 +82,14 @@ export default function PhotoMessage({ photo, isOwnMessage, maxWidth = 200 }) {
         ]}
         activeOpacity={0.8}
       >
+        {/* Placeholder with shimmer effect */}
         {isLoading && (
-          <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="small" color="#007AFF" />
-          </View>
+          <ImagePlaceholder
+            width={displayDimensions.width}
+            height={displayDimensions.height}
+            showSpinner={true}
+            iconSize={Math.min(displayDimensions.width / 8, 32)}
+          />
         )}
         
         {hasError ? (
@@ -85,19 +98,21 @@ export default function PhotoMessage({ photo, isOwnMessage, maxWidth = 200 }) {
             <Text style={styles.errorSubtext}>Failed to load</Text>
           </View>
         ) : (
-          <Image
-            source={{ uri: photo.url }}
-            style={[
-              styles.photo,
-              {
-                width: displayDimensions.width,
-                height: displayDimensions.height,
-              }
-            ]}
-            onLoad={handleImageLoad}
-            onError={handleImageError}
-            resizeMode="cover"
-          />
+          <Animated.View style={{ opacity: fadeAnim }}>
+            <Image
+              source={{ uri: photo.url }}
+              style={[
+                styles.photo,
+                {
+                  width: displayDimensions.width,
+                  height: displayDimensions.height,
+                }
+              ]}
+              onLoad={handleImageLoad}
+              onError={handleImageError}
+              resizeMode="cover"
+            />
+          </Animated.View>
         )}
       </TouchableOpacity>
 
@@ -119,6 +134,7 @@ export default function PhotoMessage({ photo, isOwnMessage, maxWidth = 200 }) {
               source={{ uri: photo.url }}
               style={styles.fullscreenPhoto}
               resizeMode="contain"
+              fadeDuration={200}
             />
           </TouchableOpacity>
         </View>
