@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getDatabase } from 'firebase/database';
@@ -15,8 +15,8 @@ const firebaseConfig = {
   databaseURL: "https://msgapp-74ca2-default-rtdb.firebaseio.com"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase (check if already initialized to avoid duplicate app error)
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // Initialize Firebase services
 export const auth = getAuth(app);
@@ -30,28 +30,32 @@ console.log('✅ Firebase initialized:', {
   databaseURL: firebaseConfig.databaseURL
 });
 
-// Enable offline persistence
-enableIndexedDbPersistence(db).catch((err) => {
-  if (err.code === 'failed-precondition') {
-    // Multiple tabs open, persistence can only be enabled in one tab at a time.
-    console.warn('Offline persistence failed: Multiple tabs open');
-  } else if (err.code === 'unimplemented') {
-    // The current browser doesn't support persistence
-    console.warn('Offline persistence not supported in this browser');
-  } else {
-    console.error('Error enabling offline persistence:', err);
-  }
-});
+// Enable offline persistence (only once)
+if (getApps().length === 1) {
+  enableIndexedDbPersistence(db).catch((err) => {
+    if (err.code === 'failed-precondition') {
+      // Multiple tabs open, persistence can only be enabled in one tab at a time.
+      console.warn('Offline persistence failed: Multiple tabs open');
+    } else if (err.code === 'unimplemented') {
+      // The current browser doesn't support persistence
+      console.warn('Offline persistence not supported in this browser');
+    } else {
+      console.error('Error enabling offline persistence:', err);
+    }
+  });
+}
 
 // Connect to Firebase Emulator (for local development)
 // Uncomment these lines if using Firebase Emulator:
 /*
 import { connectAuthEmulator } from 'firebase/auth';
 import { connectFirestoreEmulator } from 'firebase/firestore';
+import { connectDatabaseEmulator } from 'firebase/database';
 
 connectAuthEmulator(auth, 'http://127.0.0.1:9099');
 connectFirestoreEmulator(db, '127.0.0.1', 8080);
-console.log('Connected to Firebase Emulator');
+connectDatabaseEmulator(rtdb, '127.0.0.1', 9000);
+console.log('✅ Connected to Firebase Emulators');
 */
 
 export default app;
