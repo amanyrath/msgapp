@@ -2,42 +2,48 @@
  * Mock photo data for testing in Expo Go
  */
 
-// Sample placeholder images from Unsplash (these work without CORS issues)
+// Sample placeholder images from Picsum (reliable placeholder service)
+// Using fixed seed for consistent images in demo
 export const MOCK_PHOTOS = [
   {
-    url: 'https://picsum.photos/800/600?random=1',
+    url: 'https://picsum.photos/seed/msgai1/800/600',
     width: 800,
     height: 600,
     originalWidth: 1200,
     originalHeight: 900,
+    description: 'Landscape photo'
   },
   {
-    url: 'https://picsum.photos/600/800?random=2', 
+    url: 'https://picsum.photos/seed/msgai2/600/800', 
     width: 600,
     height: 800,
     originalWidth: 900,
     originalHeight: 1200,
+    description: 'Portrait photo'
   },
   {
-    url: 'https://picsum.photos/800/800?random=3',
+    url: 'https://picsum.photos/seed/msgai3/800/800',
     width: 800,
     height: 800,
     originalWidth: 1000,
     originalHeight: 1000,
+    description: 'Square photo'
   },
   {
-    url: 'https://picsum.photos/900/600?random=4',
+    url: 'https://picsum.photos/seed/msgai4/900/600',
     width: 900,
     height: 600,
     originalWidth: 1200,
     originalHeight: 800,
+    description: 'Wide landscape'
   },
   {
-    url: 'https://picsum.photos/700/900?random=5',
+    url: 'https://picsum.photos/seed/msgai5/700/900',
     width: 700,
     height: 900,
     originalWidth: 1000,
     originalHeight: 1300,
+    description: 'Tall portrait'
   },
 ];
 
@@ -85,20 +91,24 @@ export const uploadMockPhoto = async (uri, chatId, userId) => {
  */
 export const processMockPhoto = async (source, chatId, userId) => {
   try {
-    console.log(`🎭 Processing mock photo from ${source}`);
+    console.log(`🎭 Processing mock photo from ${source} (Expo Go mode)`);
     
-    // 1. "Select" photo
+    // 1. "Select" photo (with simulated delay to match real camera)
     const photoData = await selectMockPhoto(source);
     
-    // 2. "Upload" photo  
+    // 2. "Upload" photo (simulate Firebase Storage upload)
     const downloadURL = await uploadMockPhoto(photoData.url, chatId, userId);
     
-    return {
+    const result = {
       ...photoData,
       url: downloadURL,
+      isMock: true, // Flag to indicate this is a mock photo
     };
+    
+    console.log('✅ Mock photo processed successfully:', result.description);
+    return result;
   } catch (error) {
-    console.error('Error processing mock photo:', error);
+    console.error('❌ Error processing mock photo:', error);
     throw new Error('Failed to process mock photo: ' + error.message);
   }
 };

@@ -171,11 +171,21 @@ export const uploadPhoto = async (uri, chatId, userId) => {
 };
 
 /**
- * Check if running in Expo Go
+ * Check if running in Expo Go vs development/production build
  * @returns {boolean} True if running in Expo Go
  */
 const isExpoGo = () => {
+  // Constants.appOwnership is null in Expo Go, 'expo' in dev builds, 'standalone' in production
   return Constants.appOwnership === null;
+};
+
+/**
+ * Check if real camera/photo functionality is available
+ * @returns {boolean} True if real photo functionality should work
+ */
+const hasRealPhotoCapability = () => {
+  // Development builds and standalone builds support real camera
+  return Constants.appOwnership === 'expo' || Constants.appOwnership === 'standalone';
 };
 
 /**
@@ -187,13 +197,17 @@ const isExpoGo = () => {
  */
 export const processPhoto = async (source, chatId, userId) => {
   try {
-    // Use mock photos in Expo Go
+    // Use mock photos in Expo Go, real photos in dev/standalone builds
     if (isExpoGo()) {
       console.log('🎭 Using mock photos (running in Expo Go)');
       return await processMockPhoto(source, chatId, userId);
     }
 
-    console.log('📸 Using real camera/gallery (development/production build)');
+    if (hasRealPhotoCapability()) {
+      console.log('📸 Using real camera/gallery (development/production build)');
+    } else {
+      console.warn('⚠️ Photo capability detection unclear, attempting real photos');
+    }
     
     // 1. Request permissions
     const permissions = await requestPhotoPermissions();

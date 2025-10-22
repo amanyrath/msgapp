@@ -2,13 +2,14 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, ActivityIndicator, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as Notifications from 'expo-notifications';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NetworkProvider } from './context/NetworkContext';
 import { NotificationProvider } from './context/NotificationContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { registerForPushNotifications } from './utils/notifications';
+import { Logger } from './utils/logger';
 
 // Import screens
 import LoginScreen from './screens/LoginScreen';
@@ -18,12 +19,20 @@ import ChatListScreen from './screens/ChatListScreen';
 import NewChatScreen from './screens/NewChatScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import ChatSettingsScreen from './screens/ChatSettingsScreen';
+import SplashScreen from './screens/SplashScreen';
 
 const Stack = createNativeStackNavigator();
 
 function Navigation() {
   const { user, loading } = useAuth();
   const navigationRef = useRef();
+  const [showSplash, setShowSplash] = useState(true);
+
+  // Handle splash screen completion
+  const handleSplashComplete = () => {
+    Logger.ui('Splash screen completed');
+    setShowSplash(false);
+  };
 
   // Request notification permissions when user logs in
   useEffect(() => {
@@ -45,6 +54,11 @@ function Navigation() {
 
     return () => subscription.remove();
   }, []);
+
+  // Show splash screen on first load
+  if (showSplash) {
+    return <SplashScreen onComplete={handleSplashComplete} />;
+  }
 
   // Show loading screen while checking auth state
   if (loading) {
