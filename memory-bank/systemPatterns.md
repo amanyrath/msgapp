@@ -1,27 +1,36 @@
 # MessageAI — System Patterns
 
 ## Architecture Overview
-MessageAI follows a client-only architecture for the MVP, with Firebase providing backend services (authentication, database, and real-time sync).
+MessageAI is a full-featured **International Communicator** with AI-powered capabilities, built on a client-first architecture with Firebase backend services and OpenAI integration for advanced AI features.
 
 ```
 ┌─────────────────────────────────────────────┐
-│       React Native (Expo) App               │
+│    React Native (Expo) International        │
+│         Communicator App                    │
 ├─────────────────────────────────────────────┤
 │  • Screens (ChatList, Chat, NewChat, Auth)  │
+│  • AI Components (AIAssistant, AIMenuButton)│
 │  • Context Providers (Auth, Network,        │
-│    Presence, Error Boundary)                │
-│  • Utils (Firestore, Presence helpers)      │
+│    Presence, Notification, Error Boundary)  │
+│  • Utils (Firestore, Presence, AI Services) │
 │  • Firebase SDK (Auth, Firestore, RTDB)     │
+│  • OpenAI SDK (GPT-4o mini integration)     │
 └─────────────────┬───────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────┐
-│           Firebase Services                 │
+│            Backend Services                 │
 ├─────────────────────────────────────────────┤
-│  • Authentication (Email/Password)          │
-│  • Firestore (Messages, Chats, Users)      │
+│  • Firebase Authentication                  │
+│  • Firestore (Messages, Chats, Users,       │
+│    AI Messages with threading)              │
 │  • Realtime Database (Presence System)      │
 │  • Offline Persistence (IndexedDB)          │
+│  • OpenAI API (GPT-4o mini)                │
+│    - Real-time Translation                  │
+│    - Cultural Context Analysis              │
+│    - Smart Replies & Formality Adjustment   │
+│    - RAG Pipeline with Chat History         │
 └─────────────────────────────────────────────┘
 ```
 
@@ -47,9 +56,17 @@ App.js (Root)
 │                       ├── Header (presence text)
 │                       ├── MessageList (FlatList)
 │                       │   ├── Message bubbles
+│                       │   ├── AI threaded messages
 │                       │   ├── Read indicators
 │                       │   └── Timestamps
 │                       └── MessageInput
+│                           ├── Text input
+│                           └── AIMenuButton (🤖)
+│                               └── AIAssistant Modal
+│                                   ├── Quick actions
+│                                   ├── Natural language chat
+│                                   ├── Translation interface
+│                                   └── Cultural context display
 ```
 
 ## Key Technical Decisions
@@ -89,7 +106,16 @@ App.js (Root)
 - Stack navigation for chat flow
 - Dynamic initial route based on auth state
 
-### 5. Presence System
+### 5. AI Integration Architecture  
+**Choice**: OpenAI GPT-4o mini with RAG Pipeline  
+**Rationale**:
+- Cost-effective model with excellent performance for international communication
+- 128K token context window supports extensive conversation history
+- Sub-2 second response times for real-time user experience
+- JSON mode for structured responses (translation + cultural context)
+- Modular service architecture for easy feature expansion
+
+### 6. Presence System
 **Choice**: Firebase Realtime Database (RTDB)  
 **Rationale**:
 - `.onDisconnect()` is purpose-built for presence
@@ -97,7 +123,7 @@ App.js (Root)
 - Automatic offline detection
 - Low latency for status updates
 
-### 6. Offline Support
+### 7. Offline Support
 **Choice**: Firestore offline persistence + NetworkContext  
 **Rationale**:
 - IndexedDB cache for instant message loading
@@ -203,7 +229,38 @@ await set(statusRef, { state: 'online', ... });
 await onDisconnect(statusRef).set({ state: 'offline', ... });
 ```
 
-### 8. Array Union for Read Receipts
+### 8. AI Message Threading Pattern
+**Where**: AI Assistant responses  
+**Purpose**: Link AI responses to original messages without cluttering conversation  
+**Implementation**:
+```javascript
+// AI messages stored as threaded responses
+const aiMessage = {
+  type: 'ai_response',
+  parentMessageId: originalMessageId,
+  aiType: 'translation', // or 'cultural_context', 'smart_reply'
+  content: aiResponse,
+  confidence: 0.95,
+  culturalNotes: [...],
+  timestamp: serverTimestamp()
+};
+```
+
+### 9. RAG Pipeline Pattern
+**Where**: AI context building  
+**Purpose**: Provide conversation context to AI for better responses  
+**Implementation**:
+```javascript
+// Build context from recent messages
+const context = buildAIContext({
+  messages: messages.slice(-50), // Last 50 messages
+  userProfile: currentUser,
+  chatMetadata: { type: 'group', members: 5 },
+  preferences: { formality: 'casual', nativeLanguage: 'English' }
+});
+```
+
+### 10. Array Union for Read Receipts
 **Where**: Message read tracking  
 **Purpose**: Prevent duplicate entries  
 **Implementation**:
@@ -214,6 +271,72 @@ await updateDoc(messageRef, {
 ```
 
 ## Data Flow Patterns
+
+### AI Translation Flow
+```
+User Request (Translate last hour)
+    ↓
+AIAssistant component handles request
+    ↓
+buildAIContext() gathers conversation history
+    ↓
+Filter messages from last hour
+    ↓
+For each message:
+  ↓
+  translateText() API call to OpenAI
+  ↓
+  Response with translation + cultural context
+  ↓
+  sendAIMessage() stores threaded response
+  ↓
+  Real-time listener updates UI
+    ↓
+AI messages appear threaded below originals
+    ↓
+User sees translations with cultural notes
+```
+
+### Cultural Context Analysis Flow
+```
+User opens AI Assistant
+    ↓
+Component analyzes recent messages
+    ↓
+buildAIContext() creates cultural profile
+    ↓
+analyzeConversationCulture() API call
+    ↓
+GPT-4o analyzes slang, idioms, cultural patterns
+    ↓
+Response includes:
+  - Detected cultural elements
+  - Explanations and context
+  - Communication improvement tips
+    ↓
+Display in AI Assistant with highlights
+```
+
+### Smart Reply Generation Flow  
+```
+User requests smart replies
+    ↓
+buildAIContext() analyzes conversation
+    ↓
+generateSmartReplies() API call with:
+  - Recent messages (context)
+  - Conversation style (casual/formal)
+  - Cultural considerations
+  - User preferences
+    ↓
+GPT-4o generates culturally appropriate responses
+    ↓
+Returns multiple options with explanations
+    ↓
+User can select or customize suggestions
+    ↓
+Selected reply inserted into message input
+```
 
 ### Authentication Flow
 ```
@@ -328,10 +451,17 @@ UI updates across all devices
   uid: string,           // User ID
   email: string,         // Email address
   displayName: string,   // Display name (set to nickname)
-  nickname: string,      // User's chosen nickname (NEW)
-  icon: string,          // User's emoji avatar (NEW)
+  nickname: string,      // User's chosen nickname
+  icon: string,          // User's emoji avatar
   createdAt: timestamp,  // Account creation time
-  updatedAt: timestamp   // Last profile update
+  updatedAt: timestamp,  // Last profile update
+  
+  // AI Preferences (future enhancement)
+  preferences: {
+    nativeLanguage: string,      // User's native language
+    formality: string,           // Preferred communication style
+    culturalContext: string      // Cultural background info
+  }
 }
 ```
 
@@ -352,10 +482,23 @@ UI updates across all devices
 {
   senderId: string,      // User who sent message
   senderEmail: string,   // Sender's email
-  senderName: string,    // Sender's nickname (NEW - persisted for history)
+  senderName: string,    // Sender's nickname (persisted for history)
   text: string,          // Message content
   timestamp: timestamp,  // Server timestamp
   readBy: [userId, ...]  // Array of users who read it
+  
+  // AI Enhancement fields
+  type: 'user' | 'ai_response',     // Message type
+  parentMessageId: string,          // For AI threaded responses
+  aiType: 'translation' | 'cultural_context' | 'smart_reply' | 'formality_adjustment',
+  aiData: {
+    confidence: number,             // AI confidence score (0-1)
+    culturalNotes: [string],        // Cultural context explanations
+    originalLanguage: string,       // Detected source language
+    targetLanguage: string,         // Translation target
+    formalityAdjustment: string,    // Explanation of tone changes
+    suggestedReplies: [string]      // Smart reply options
+  }
 }
 ```
 

@@ -8,25 +8,38 @@
 - **React**: ^18.x.x
 
 ### Backend Services
-- **Firebase Authentication**: Web SDK v11.x.x
-- **Firebase Firestore**: Web SDK v11.x.x
-- **Firebase Core**: v11.x.x
+- **Firebase Authentication**: Web SDK v12.x.x
+- **Firebase Firestore**: Web SDK v12.x.x
+- **Firebase Realtime Database**: Web SDK v12.x.x
+- **Firebase Core**: v12.x.x
+
+### AI Services
+- **OpenAI API**: GPT-4o mini for translation, cultural analysis, and smart replies
+- **OpenAI SDK**: ^6.6.0 for JavaScript integration
 
 ### Development Tools
 - **Node.js**: v18+ required
 - **npm**: Package manager
 - **Expo Go**: For iOS device testing
 - **iOS Simulator**: For development testing
+- **EAS Build**: For production app builds
+- **OpenAI API**: Account required for AI features
+- **Firebase Emulators**: For local development
 
 ## Development Setup
 
 ### Initial Setup
 ```bash
 # Navigate to project
-cd /Users/alexismanyrath/Documents/Gauntlet/msgapp/messageai
+cd /Users/alexismanyrath/Code/msgapp/messageai
 
-# Install dependencies (already done)
+# Install dependencies
 npm install
+
+# Set up environment variables (REQUIRED for AI features)
+touch .env
+echo "OPENAI_API_KEY=your_openai_api_key_here" >> .env
+echo "USE_EMULATORS=true" >> .env
 
 # Start development server
 npm start
@@ -56,14 +69,37 @@ For multi-user testing:
 ## Project Structure
 ```
 messageai/
-├── App.js                  # Root component
+├── App.js                  # Root component with AI navigation
+├── .env                   # Environment variables (OpenAI API key)
 ├── config/
 │   └── firebase.js        # Firebase configuration
+├── components/
+│   ├── AIAssistant.js     # AI Assistant modal interface
+│   ├── AIMenuButton.js    # AI-first menu button
+│   ├── PhotoPicker.js     # Photo sharing components
+│   └── ...                # Other UI components
+├── utils/
+│   ├── aiService.js       # OpenAI integration & AI operations
+│   ├── aiContext.js       # RAG pipeline with conversation context
+│   ├── aiFirestore.js     # AI message storage and threading
+│   ├── firestore.js       # Firestore operations
+│   ├── presence.js        # Real-time presence system
+│   └── notifications.js   # Push notification handling
+├── context/
+│   ├── AuthContext.js     # Authentication & user management
+│   ├── NetworkContext.js  # Connection monitoring
+│   ├── PresenceContext.js # Multi-user presence
+│   └── NotificationContext.js # Notification management
+├── screens/
+│   ├── ChatScreen.js      # Chat with AI integration
+│   ├── ChatListScreen.js  # Chat list with AI indicators
+│   └── ...                # Other screens
 ├── assets/                # Icons, images, splash screens
 ├── node_modules/          # Dependencies (git-ignored)
 ├── package.json           # Dependencies and scripts
 ├── package-lock.json      # Locked dependency versions
 ├── app.json              # Expo configuration
+├── eas.json              # EAS Build configuration
 ├── index.js              # Entry point
 ├── .gitignore            # Git ignore rules
 └── README.md             # Documentation
@@ -99,17 +135,24 @@ const firebaseConfig = {
 ## Technical Constraints
 
 ### Platform Constraints
-- **iOS First**: Primary development on iOS
+- **iOS First**: Primary development on iOS (Android supported)
 - **Expo Limitations**: Must use Expo-compatible packages
-- **No Native Modules**: Sticking to Expo Go for MVP (no custom native code)
+- **No Native Modules**: Sticking to Expo Go for development (EAS Build for production)
 
 ### Firebase Constraints
 - **Web SDK**: Using web SDK (not React Native Firebase) for simplicity
 - **Offline Size Limit**: Firestore offline cache has size limits (40MB default)
-- **Rate Limits**: Firebase has read/write rate limits (shouldn't hit in MVP)
+- **Rate Limits**: Firebase has read/write rate limits (not an issue with current usage)
+
+### AI Service Constraints
+- **OpenAI Rate Limits**: 10,000 requests/day on free tier, 3 requests/minute initially
+- **Response Time Target**: Sub-2 seconds for all AI operations
+- **Context Window**: GPT-4o mini supports 128K tokens (sufficient for conversation context)
+- **API Cost**: ~$0.0001-0.0006 per request depending on context size
 
 ### Performance Targets
 - Message delivery: < 300ms when online
+- AI response time: < 2 seconds (achieved)
 - App startup: < 2 seconds
 - Offline sync: Automatic on reconnection
 - UI responsiveness: 60 FPS scrolling
@@ -120,28 +163,48 @@ const firebaseConfig = {
 ```json
 {
   "dependencies": {
-    "expo": "~52.0.x",
-    "expo-status-bar": "~2.0.x",
-    "react": "^18.x.x",
-    "react-native": "0.76.x",
-    "firebase": "^11.x.x"
+    "expo": "~54.0.14",
+    "expo-status-bar": "~3.0.8",
+    "react": "19.1.0",
+    "react-native": "0.81.4",
+    "firebase": "^12.4.0",
+    "openai": "^6.6.0",
+    "@react-native-community/netinfo": "^11.4.1",
+    "@react-navigation/native": "^7.1.18",
+    "@react-navigation/native-stack": "^7.3.28",
+    "expo-notifications": "^0.32.12",
+    "expo-constants": "^18.0.9",
+    "expo-image-picker": "^17.0.8",
+    "expo-image-manipulator": "^14.0.7",
+    "react-native-safe-area-context": "^5.6.1",
+    "react-native-screens": "~4.16.0",
+    "dotenv": "^17.2.3"
   }
 }
 ```
 
-### Upcoming Dependencies (PR #2+)
-- `@react-navigation/native` - Navigation
-- `@react-navigation/native-stack` - Stack navigation
-- `react-native-screens` - Native navigation primitives
-- `react-native-safe-area-context` - Safe area handling
+### AI & International Features Dependencies
+- `openai` - OpenAI API integration for AI features
+- `expo-constants` - Environment variable handling for API keys
+- `expo-notifications` - Push notification support
+- `expo-image-picker` - Future image sharing capabilities
+- `expo-image-manipulator` - Image processing utilities
+- `dotenv` - Environment configuration management
 
 ## Environment Variables
-**Not using environment variables for MVP** because:
-- Expo requires special handling for env vars
-- Firebase config isn't sensitive in client apps
-- Direct config file is simpler for MVP
+**Using .env file for AI configuration:**
+```bash
+# messageai/.env (required for AI features)
+OPENAI_API_KEY=your_openai_api_key_here
+USE_EMULATORS=false
+```
 
-Future consideration: Use `expo-constants` + `app.config.js` for env vars
+**Setup Instructions:**
+1. Create `.env` file in `messageai/` directory
+2. Add OpenAI API key from https://platform.openai.com/api-keys
+3. Set `USE_EMULATORS=true` for local development, `false` for production
+
+**Security Note**: API keys are loaded at build time via `expo-constants` and `dotenv`
 
 ## Build and Deployment (Future)
 For production builds:
