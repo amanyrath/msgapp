@@ -40,8 +40,15 @@ export function NotificationProvider({ children }) {
         // Check if this chat has a newer message than we've seen
         const lastMessage = chat.lastMessage;
         const lastMessageTime = chat.lastMessageTime;
+        const lastMessageSenderId = chat.lastMessageSenderId;
         
         if (!lastMessage || !lastMessageTime) return;
+        
+        // Skip notifications for own messages
+        if (lastMessageSenderId === user?.uid) {
+          console.log('🔕 Notification skipped: own message');
+          return;
+        }
         
         const messageKey = `${chat.id}-${lastMessageTime?.toMillis?.() || Date.now()}`;
         
@@ -51,10 +58,9 @@ export function NotificationProvider({ children }) {
         }
         processedMessages.current.add(messageKey);
 
-        // Parse sender info from lastMessage (format: "SenderName: message text")
-        const messageParts = lastMessage.split(': ');
-        const senderName = messageParts[0];
-        const messageText = messageParts.slice(1).join(': ');
+        // Use the message text directly (no need to parse sender info)
+        const messageText = lastMessage;
+        const senderName = 'New Message'; // We'll improve this with user profiles later
         
         // Don't show notification if chat is currently active
         if (chat.id !== activeChat) {

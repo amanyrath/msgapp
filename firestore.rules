@@ -27,7 +27,15 @@ service cloud.firestore {
         // Users can create messages in chats they're members of
         allow create: if request.auth != null 
           && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.members
-          && request.auth.uid == request.resource.data.senderId;
+          && (
+            // Regular user messages
+            (request.auth.uid == request.resource.data.senderId)
+            ||
+            // AI messages requested by user
+            (request.resource.data.senderId == 'ai-assistant' 
+             && request.resource.data.type == 'ai'
+             && request.resource.data.aiMetadata.requestedBy == request.auth.uid)
+          );
         
         // Users can update messages they sent (for read receipts)
         allow update: if request.auth != null 

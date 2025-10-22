@@ -8,8 +8,12 @@ service firebase.storage {
     match /photos/{chatId}/{fileName} {
       allow read: if request.auth != null;
       allow write: if request.auth != null
-        && request.auth.uid != null
-        && resource.size < 10 * 1024 * 1024; // Max 10MB per photo
+        && request.auth.uid != null;
+    }
+    
+    // Also allow direct photo uploads (fallback pattern)
+    match /photos/{allPaths=**} {
+      allow read, write: if request.auth != null;
     }
     
     // Deny all other access

@@ -35,7 +35,8 @@ import {
 } from '../utils/presence';
 import { processPhoto } from '../utils/photos';
 import PhotoMessage from '../components/PhotoMessage';
-import PhotoPicker from '../components/PhotoPicker';
+import TranslationMessage from '../components/TranslationMessage';
+import AIMenuButton from '../components/AIMenuButton';
 import TypingIndicator from '../components/TypingIndicator';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -494,6 +495,19 @@ export default function ChatScreen({ route, navigation }) {
       }
     }
 
+    // Render AI messages differently
+    if (item.type === 'ai') {
+      return (
+        <TranslationMessage 
+          message={item}
+          onFeedback={(messageId, helpful) => {
+            // Handle AI feedback - could implement in future
+            console.log('AI feedback:', messageId, helpful);
+          }}
+        />
+      );
+    }
+
     // Render photo messages differently
     if (item.type === 'photo' && item.photo) {
       return (
@@ -675,9 +689,13 @@ export default function ChatScreen({ route, navigation }) {
             />
 
             <View style={styles.inputContainer}>
-              <PhotoPicker 
+              <AIMenuButton 
                 onPhotoSelected={handleSendPhoto}
                 disabled={sendingPhoto || isOffline}
+                chatId={chatId}
+                messages={messages}
+                userProfiles={userProfiles}
+                currentUser={user}
               />
               <TextInput
                 style={styles.input}

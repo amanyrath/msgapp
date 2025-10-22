@@ -28,6 +28,7 @@ import { db } from '../config/firebase';
  *   - createdAt: timestamp
  *   - lastMessage: string
  *   - lastMessageTime: timestamp
+ *   - lastMessageSenderId: string - User ID of who sent the last message
  *   - type: 'direct' | 'group' - Chat type
  * 
  * /chats/{chatId}/messages/{messageId}
@@ -38,10 +39,17 @@ import { db } from '../config/firebase';
  *     - url: string - Firebase Storage download URL
  *     - width: number - Image width
  *     - height: number - Image height
- *   - type: 'text' | 'photo' - Message type
+ *   - type: 'text' | 'photo' | 'ai' - Message type
  *   - timestamp: serverTimestamp
  *   - readBy: [userId1, userId2, ...] - array of users who read the message
  *   - senderName: string - Sender's display name/nickname (optional)
+ *   - aiMetadata: object (for AI messages)
+ *     - operation: 'translation' | 'explanation' | 'suggestion' | 'analysis'
+ *     - originalMessageId: string - Reference to original message being translated/explained
+ *     - sourceLanguage: string - Original language
+ *     - targetLanguage: string - Translation target language
+ *     - confidence: number - AI confidence score
+ *     - culturalNotes: array - Cultural context notes
  */
 
 /**
@@ -164,6 +172,7 @@ export const sendMessage = async (chatId, senderId, senderEmail, text, senderNam
         {
           lastMessage: text,
           lastMessageTime: serverTimestamp(),
+          lastMessageSenderId: senderId, // Track who sent the last message
         },
         { merge: true }
       );
@@ -217,6 +226,7 @@ export const sendPhotoMessage = async (chatId, senderId, senderEmail, photo, sen
         {
           lastMessage: '📷 Photo',
           lastMessageTime: serverTimestamp(),
+          lastMessageSenderId: senderId, // Track who sent the last message
         },
         { merge: true }
       );
