@@ -71,8 +71,8 @@ export default function NewChatScreen({ navigation }) {
 
     const memberDisplayNames = memberIds.map((id) => {
       const profile = userMap[id];
-      if (profile?.displayName) return profile.displayName;
       if (profile?.nickname) return profile.nickname;
+      if (profile?.displayName) return profile.displayName;
       if (profile?.email) return profile.email;
       if (id === user.uid) return user.email || 'You';
       return id;
@@ -97,7 +97,7 @@ export default function NewChatScreen({ navigation }) {
     if (memberIds.length >= 3) {
       const otherMembers = selectedIds.map((id) => {
         const profile = userMap[id];
-        return profile?.displayName || profile?.nickname || profile?.email || 'User';
+        return profile?.nickname || profile?.displayName || profile?.email || 'User';
       });
       metadata.name = otherMembers.join(' & ');
     }

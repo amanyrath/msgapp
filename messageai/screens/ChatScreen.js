@@ -292,7 +292,7 @@ export default function ChatScreen({ route, navigation }) {
 
     // Get current user's profile for nickname
     const currentUserProfile = userProfiles.find(p => p.id === user.uid);
-    const senderName = currentUserProfile?.displayName || currentUserProfile?.nickname || user.email?.split('@')[0] || 'User';
+    const senderName = currentUserProfile?.nickname || currentUserProfile?.displayName || user.email?.split('@')[0] || 'User';
 
     // Optimistic UI update - add message immediately
     const optimisticMessage = {
@@ -336,7 +336,7 @@ export default function ChatScreen({ route, navigation }) {
 
       // Get current user's profile for nickname
       const currentUserProfile = userProfiles.find(p => p.id === user.uid);
-      const senderName = currentUserProfile?.displayName || currentUserProfile?.nickname || user.email?.split('@')[0] || 'User';
+      const senderName = currentUserProfile?.nickname || currentUserProfile?.displayName || user.email?.split('@')[0] || 'User';
 
       // Process photo (select, resize, upload)
       const photoData = await processPhoto(source, chatId, user.uid);
@@ -410,8 +410,8 @@ export default function ChatScreen({ route, navigation }) {
     const metaName = metadataNameMap[memberId];
     if (metaName) return metaName;
     const profile = userProfileMap[memberId];
-    if (profile?.displayName) return profile.displayName;
     if (profile?.nickname) return profile.nickname;
+    if (profile?.displayName) return profile.displayName;
     if (profile?.email) return profile.email;
     if (fallbackEmail) return fallbackEmail;
     return memberId;

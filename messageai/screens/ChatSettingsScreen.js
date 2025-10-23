@@ -95,7 +95,7 @@ export default function ChatSettingsScreen({ route, navigation }) {
       .filter(id => id !== user?.uid)
       .map(id => {
         const profile = userProfiles.find(p => p.id === id);
-        return profile?.displayName || profile?.nickname || profile?.email || 'Unknown';
+        return profile?.nickname || profile?.displayName || profile?.email || 'Unknown';
       })
       .join(', ');
     
