@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import Constants from 'expo-constants';
 import { requestPhotoPermissions } from '../utils/photos';
+import { useTranslation } from '../context/LocalizationContext';
 import AIAssistant from './AIAssistant';
 
 /**
@@ -23,9 +24,11 @@ export default function AIMenuButton({
   chatId,
   messages = [],
   userProfiles = [],
-  currentUser
+  currentUser,
+  onAutoTranslateChange // New prop to handle auto-translate state changes
 }) {
   const [showAIAssistant, setShowAIAssistant] = useState(false);
+  const t = useTranslation();
 
   const handlePress = async () => {
     if (disabled) return;
@@ -34,9 +37,9 @@ export default function AIMenuButton({
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: ['Cancel', '🤖 AI Assistant', '📸 Take Photo', '🖼️ Choose Photo'],
+          options: [t('cancel'), t('aiAssistantOption'), t('takePhoto'), t('choosePhoto')],
           cancelButtonIndex: 0,
-          title: 'What would you like to do?'
+          title: t('whatWouldYouLikeToDo')
         },
         (buttonIndex) => {
           handleMenuSelection(buttonIndex);
@@ -44,13 +47,13 @@ export default function AIMenuButton({
       );
     } else {
       Alert.alert(
-        'Choose Action',
-        'What would you like to do?',
+        t('chooseAction'),
+        t('whatWouldYouLikeToDo'),
         [
-          { text: 'Cancel', style: 'cancel' },
-          { text: '🤖 AI Assistant', onPress: () => handleMenuSelection(1) },
-          { text: '📸 Take Photo', onPress: () => handleMenuSelection(2) },
-          { text: '🖼️ Choose Photo', onPress: () => handleMenuSelection(3) }
+          { text: t('cancel'), style: 'cancel' },
+          { text: t('aiAssistantOption'), onPress: () => handleMenuSelection(1) },
+          { text: t('takePhoto'), onPress: () => handleMenuSelection(2) },
+          { text: t('choosePhoto'), onPress: () => handleMenuSelection(3) }
         ]
       );
     }
@@ -135,6 +138,7 @@ export default function AIMenuButton({
           messages={messages}
           userProfiles={userProfiles}
           currentUser={currentUser}
+          onAutoTranslateChange={onAutoTranslateChange}
         />
       </Modal>
     </View>

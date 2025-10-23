@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import { useNotifications } from '../context/NotificationContext';
+import { useTranslation } from '../context/LocalizationContext';
 import {
   createOrGetChat,
   sendMessage,
@@ -40,11 +41,15 @@ import AIMenuButton from '../components/AIMenuButton';
 import TypingIndicator from '../components/TypingIndicator';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
+// AI imports moved to dynamic imports for better bundle splitting
+import subscriptionManager from '../utils/subscriptionManager';
+import { printSubscriptionAnalysis } from '../utils/subscriptionDebugger';
 
 export default function ChatScreen({ route, navigation }) {
   const { user } = useAuth();
   const { isOffline } = useNetwork();
   const { setActiveChatId } = useNotifications();
+  const t = useTranslation();
   const [chatId, setChatId] = useState(route?.params?.chatId ?? null);
   const [chatMembers, setChatMembers] = useState(route?.params?.members ?? []);
   const [chatMetadata, setChatMetadata] = useState(route?.params?.metadata ?? {});
@@ -59,6 +64,117 @@ export default function ChatScreen({ route, navigation }) {
   // Typing indicators
   const [typingUsers, setTypingUsers] = useState([]);
   const typingTimeoutRef = useRef(null);
+  
+  // Auto-translation state
+  const [autoTranslateSettings, setAutoTranslateSettings] = useState({
+    enabled: false,
+    targetLanguage: 'English',
+    formality: 'casual'
+  });
+  
+  // Track processed messages to avoid re-translating
+  const processedMessageIds = useRef(new Set());
+  
+  // Clear processed message IDs when chat changes
+  useEffect(() => {
+    processedMessageIds.current.clear();
+  }, [chatId]);
+
+  // DEVELOPMENT: Log subscription analysis (remove in production)
+  useEffect(() => {
+    if (__DEV__ && chatId) {
+      // Log subscription analysis after component settles
+      const timer = setTimeout(() => {
+        console.log('📊 ChatScreen Subscription Analysis for chat:', chatId);
+        printSubscriptionAnalysis();
+      }, 2000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [chatId]);
+  
+  // Callback for auto-translate settings changes - memoized to prevent re-renders
+  const handleAutoTranslateChange = useCallback((settings) => {
+    setAutoTranslateSettings(settings);
+    console.log('🔄 Auto-translate settings updated:', settings);
+  }, []);
+
+  // Auto-translate new messages when enabled - memoized to prevent re-renders
+  const handleAutoTranslateMessage = useCallback(async (message) => {
+    // Skip if auto-translate is disabled
+    if (!autoTranslateSettings.enabled) return;
+    
+    // Skip if message is from current user, AI, or already processed
+    if (message.senderId === user?.uid || 
+        message.type === 'ai' || 
+        processedMessageIds.current.has(message.id)) {
+      return;
+    }
+    
+    // Skip if message doesn't have text
+    if (!message.text || message.text.trim() === '') return;
+    
+    try {
+      console.log('🔄 Auto-translating message:', message.text);
+      
+      // Mark as processed to avoid duplicate translations
+      processedMessageIds.current.add(message.id);
+      
+      // Dynamic import for better bundle splitting
+      const { translateText } = await import('../utils/aiService');
+      const translationResult = await translateText({
+        text: message.text,
+        targetLanguage: autoTranslateSettings.targetLanguage,
+        formality: autoTranslateSettings.formality,
+        culturalContext: {
+          chatContext: 'auto-translation',
+          userLocation: user?.location
+        }
+      });
+      
+      if (translationResult.success) {
+        // Create auto-translation message display
+        let translationDisplay = `🔄 **Auto-Translation** (${translationResult.detectedLanguage || 'Auto'} → ${autoTranslateSettings.targetLanguage}):\n\n${translationResult.translation}`;
+        
+        // Add quality indicators
+        if (translationResult.qualityMetrics) {
+          const metrics = translationResult.qualityMetrics;
+          translationDisplay += `\n\n📊 **Quality**: ${Math.round(metrics.overallScore * 100)}%`;
+        }
+        
+        if (translationResult.culturalNotes && translationResult.culturalNotes.length > 0) {
+          translationDisplay += `\n\n🏛️ **Cultural Context**:\n${translationResult.culturalNotes.map(note => `• ${note}`).join('\n')}`;
+        }
+        
+        // Send auto-translation as AI message
+        const { sendAIMessage } = await import('../utils/aiFirestore');
+        await sendAIMessage({
+          chatId,
+          content: translationDisplay,
+          aiType: 'auto_translation',
+          parentMessageId: message.id,
+          metadata: {
+            originalText: message.text,
+            sourceLanguage: translationResult.detectedLanguage,
+            targetLanguage: autoTranslateSettings.targetLanguage,
+            formality: autoTranslateSettings.formality,
+            confidence: translationResult.confidence,
+            isAutomatic: true
+          },
+          senderInfo: {
+            uid: user.uid,
+            email: user.email,
+            name: user.displayName || user.email
+          }
+        });
+        
+        console.log('✅ Auto-translation completed for message:', message.id);
+      }
+    } catch (error) {
+      console.error('❌ Auto-translation failed:', error);
+      // Don't show error to user for auto-translations, just log it
+    }
+  }, [autoTranslateSettings, user, chatId]); // Dependencies: only re-create when these values change
   
   // Filter out current user from typing users
   const othersTypingUsers = useMemo(() => {
@@ -102,59 +218,111 @@ export default function ChatScreen({ route, navigation }) {
     };
   }, [chatId, setActiveChatId]);
 
-  // Subscribe to messages with PAGINATION (load last 50 messages)
+  // OPTIMIZED: Subscribe to messages using subscription manager (ONLY when chat is active)
   useEffect(() => {
     if (!chatId) return;
 
-    console.log('Subscribing to messages for chat:', chatId);
-    const unsubscribe = subscribeToMessages(chatId, (msgs) => {
-      console.log('Received messages:', msgs.length);
-      setMessages(msgs);
-      // Scroll to bottom when new messages arrive
-      setLoading(false);
-      setTimeout(() => scrollToBottom(), 100);
-      
-      // Mark unread messages as read (batch operation)
-      if (user?.uid) {
-        const unreadMessages = msgs.filter(
-          msg => msg.senderId !== user.uid && !(msg.readBy || []).includes(user.uid)
-        );
+    console.log('📡 Subscribing to messages for chat:', chatId);
+    
+    const unsubscribe = subscriptionManager.subscribe(
+      `messages-${chatId}`,
+      (callback) => subscribeToMessages(chatId, callback, 50), // Limit to 50 messages
+      (msgs) => {
+        console.log('📨 Received messages:', msgs.length);
         
-        if (unreadMessages.length > 0) {
-          const unreadIds = unreadMessages.map(msg => msg.id);
-          markMessagesAsRead(chatId, unreadIds, user.uid);
+        setMessages(msgs);
+        setLoading(false);
+        setTimeout(() => scrollToBottom(), 100);
+        
+        // Mark unread messages as read (batch operation)
+        if (user?.uid) {
+          const unreadMessages = msgs.filter(
+            msg => msg.senderId !== user.uid && !(msg.readBy || []).includes(user.uid)
+          );
+          
+          if (unreadMessages.length > 0) {
+            const unreadIds = unreadMessages.map(msg => msg.id);
+            markMessagesAsRead(chatId, unreadIds, user.uid);
+          }
         }
+      },
+      { 
+        cache: true, 
+        shared: true, 
+        priority: 'high' // Messages are high priority for active chat
       }
-    }, 50); // LIMIT: Only load last 50 messages for performance
+    );
 
     return () => unsubscribe();
   }, [chatId, user?.uid]);
 
-  // OPTIMIZED: Only load profiles for chat members (not ALL users)
+  // Separate effect for auto-translation to avoid subscription loops
+  useEffect(() => {
+    if (!autoTranslateSettings.enabled || !messages.length) return;
+    
+    // Find new messages that haven't been processed for auto-translation
+    const currentMessageIds = new Set(processedMessageIds.current);
+    const newMessages = messages.filter(msg => 
+      !currentMessageIds.has(msg.id) && 
+      msg.senderId !== user?.uid &&
+      msg.type !== 'ai' &&
+      msg.text && 
+      msg.text.trim() !== ''
+    );
+    
+    // Process each new message for auto-translation with debounce
+    if (newMessages.length > 0) {
+      console.log(`🔄 Processing ${newMessages.length} new messages for auto-translation`);
+      newMessages.forEach(message => {
+        processedMessageIds.current.add(message.id);
+        // Use delay to ensure the message is saved first and avoid rapid-fire translations
+        setTimeout(() => handleAutoTranslateMessage(message), 1500);
+      });
+    }
+  }, [messages, autoTranslateSettings.enabled, handleAutoTranslateMessage, user?.uid]);
+
+  // OPTIMIZED: Get user profiles from shared cache (no redundant subscription)
   useEffect(() => {
     if (!chatMembers || chatMembers.length === 0) return;
 
-    // Only subscribe to profiles for users in this chat
-    const unsubscribe = subscribeToUsers((profiles) => {
-      // Filter to only chat members
-      const relevantProfiles = profiles.filter(profile => 
+    // Try to get cached user profiles first
+    const cachedProfiles = subscriptionManager.getCachedData('user-profiles');
+    if (cachedProfiles) {
+      const relevantProfiles = cachedProfiles.filter(profile => 
         chatMembers.includes(profile.id)
       );
       setUserProfiles(relevantProfiles);
-    });
+    }
 
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
+    // Subscribe with very low priority since ChatListScreen will handle this
+    const unsubscribe = subscriptionManager.subscribe(
+      'user-profiles',
+      (callback) => subscribeToUsers(callback),
+      (profiles) => {
+        // Filter to only chat members
+        const relevantProfiles = profiles.filter(profile => 
+          chatMembers.includes(profile.id)
+        );
+        setUserProfiles(relevantProfiles);
+      },
+      { 
+        cache: true, 
+        shared: true, 
+        priority: 'low' // Low priority since ChatListScreen handles this
       }
-    };
+    );
+
+    return () => unsubscribe();
   }, [chatMembers]);
+
+  // Memoize other members calculation to avoid recalculating on every render
+  const otherMembers = useMemo(() => {
+    if (!chatMembers || chatMembers.length === 0) return [];
+    return chatMembers.filter((id) => id !== user?.uid);
+  }, [chatMembers, user?.uid]);
 
   // Subscribe to presence for chat members
   useEffect(() => {
-    if (!chatMembers || chatMembers.length === 0) return;
-
-    const otherMembers = chatMembers.filter((id) => id !== user?.uid);
     if (otherMembers.length === 0) return;
 
     const unsubscribe = subscribeToMultiplePresence(otherMembers, (data) => {
@@ -168,19 +336,28 @@ export default function ChatScreen({ route, navigation }) {
     };
   }, [chatMembers, user?.uid]);
 
-  // Subscribe to typing indicators (OPTIMIZED: only if chat has multiple users)
+  // OPTIMIZED: Subscribe to typing indicators only for group chats (3+ members)
   useEffect(() => {
-    if (!chatId || !chatMembers || chatMembers.length <= 1) return;
+    if (!chatId || !chatMembers || chatMembers.length < 3) {
+      // Clear typing users if not a group chat
+      setTypingUsers([]);
+      return;
+    }
 
-    const unsubscribe = subscribeToTypingUsers(chatId, (typingUserIds) => {
-      setTypingUsers(typingUserIds);
-    });
-
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
+    const unsubscribe = subscriptionManager.subscribe(
+      `typing-${chatId}`,
+      (callback) => subscribeToTypingUsers(chatId, callback),
+      (typingUserIds) => {
+        setTypingUsers(typingUserIds);
+      },
+      { 
+        cache: false, // Don't cache typing indicators (too ephemeral)
+        shared: false, // Don't share (each chat screen needs its own)
+        priority: 'low' // Low priority - nice to have feature
       }
-    };
+    );
+
+    return () => unsubscribe();
   }, [chatId, chatMembers]);
 
   // Cleanup typing timeout on unmount
@@ -196,22 +373,37 @@ export default function ChatScreen({ route, navigation }) {
     };
   }, [user, chatId]);
 
-  // Subscribe to chat metadata changes (name, icon, notes)
+  // OPTIMIZED: Subscribe to chat metadata changes with deduplication
   useEffect(() => {
     if (!chatId) return;
 
-    const chatRef = doc(db, 'chats', chatId);
-    const unsubscribe = onSnapshot(chatRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
+    const unsubscribe = subscriptionManager.subscribe(
+      `chat-metadata-${chatId}`,
+      (callback) => {
+        const chatRef = doc(db, 'chats', chatId);
+        return onSnapshot(chatRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            callback({
+              name: data.name,
+              icon: data.icon,
+              notes: data.notes,
+            });
+          }
+        });
+      },
+      (metadataUpdate) => {
         setChatMetadata((prev) => ({
           ...prev,
-          name: data.name,
-          icon: data.icon,
-          notes: data.notes,
+          ...metadataUpdate,
         }));
+      },
+      { 
+        cache: true, 
+        shared: true, 
+        priority: 'low' // Low priority - metadata changes are rare
       }
-    });
+    );
 
     return () => unsubscribe();
   }, [chatId]);
@@ -233,15 +425,13 @@ export default function ChatScreen({ route, navigation }) {
       const testChatId = await createOrGetChat(
         [user.uid],
         {
-          memberDisplayNames: [user.email],
-          memberEmails: [user.email],
+          // Personal chats don't need metadata since there are no "other" users
         }
       );
       setChatId(testChatId);
       setChatMembers([user.uid]);
       setChatMetadata({
-        memberDisplayNames: [user.email],
-        memberEmails: [user.email],
+        // Personal chats don't need metadata since there are no "other" users
       });
       console.log('Chat initialized:', testChatId);
     } catch (error) {
@@ -393,7 +583,9 @@ export default function ChatScreen({ route, navigation }) {
     const map = {};
     const metaNames = chatMetadata?.memberDisplayNames;
     if (Array.isArray(metaNames) && chatMembers?.length) {
-      chatMembers.forEach((memberId, index) => {
+      // Filter out current user from members for mapping since metadata only includes other users
+      const otherMembers = chatMembers.filter(id => id !== user?.uid);
+      otherMembers.forEach((memberId, index) => {
         const name = metaNames[index];
         if (name) {
           map[memberId] = name;
@@ -401,14 +593,22 @@ export default function ChatScreen({ route, navigation }) {
       });
     }
     return map;
-  }, [chatMetadata?.memberDisplayNames, chatMembers]);
+  }, [chatMetadata?.memberDisplayNames, chatMembers, user?.uid]);
 
   const getDisplayName = (memberId, fallbackEmail) => {
     // Don't show current user's name
     if (memberId === user?.uid) return null;
     
-    const metaName = metadataNameMap[memberId];
-    if (metaName) return metaName;
+    // For 1-on-1 chats, skip metadata and use live user profile data to avoid incorrect stored names
+    const isOneOnOne = chatMembers && chatMembers.length === 2;
+    
+    if (!isOneOnOne) {
+      // For group chats, use metadata first (allows custom nicknames)
+      const metaName = metadataNameMap[memberId];
+      if (metaName) return metaName;
+    }
+    
+    // Always prefer live user profile data for accuracy
     const profile = userProfileMap[memberId];
     if (profile?.nickname) return profile.nickname;
     if (profile?.displayName) return profile.displayName;
@@ -459,7 +659,7 @@ export default function ChatScreen({ route, navigation }) {
     // For 1-on-1 chats, show the user's presence
     if (others.length === 1) {
       const presence = presenceData[others[0]];
-      return getPresenceText(presence);
+      return getPresenceText(presence, t);
     }
     
     // For group chats, show count of online members
@@ -467,9 +667,9 @@ export default function ChatScreen({ route, navigation }) {
     const totalOthers = others.length;
     
     if (onlineCount === 0) return '';
-    if (onlineCount === 1) return '1 user online';
-    if (onlineCount === totalOthers) return `All ${totalOthers} users online`;
-    return `${onlineCount} of ${totalOthers} users online`;
+    if (onlineCount === 1) return t('oneUserOnline') || '1 user online';
+    if (onlineCount === totalOthers) return t('allUsersOnline', { count: totalOthers }) || `All ${totalOthers} users online`;
+    return t('usersOnlineCount', { online: onlineCount, total: totalOthers }) || `${onlineCount} of ${totalOthers} users online`;
   }, [chatMembers, presenceData, user?.uid]);
 
   const formatTime = (timestamp) => {
@@ -482,7 +682,8 @@ export default function ChatScreen({ route, navigation }) {
     });
   };
 
-  const renderMessage = ({ item }) => {
+  // Memoized message renderer for better performance
+  const renderMessage = useCallback(({ item }) => {
     const isMyMessage = item.senderId === user.uid;
     const senderName = getDisplayName(item.senderId, item.senderEmail);
 
@@ -625,7 +826,7 @@ export default function ChatScreen({ route, navigation }) {
         </View>
       </View>
     );
-  };
+  }, [user?.uid, getDisplayName, chatMembers, formatTime]); // Dependencies for renderMessage
 
   return (
     <SafeAreaView style={styles.container}>
@@ -636,7 +837,7 @@ export default function ChatScreen({ route, navigation }) {
               onPress={() => navigation.goBack()}
               style={styles.backButton}
             >
-              <Text style={styles.backButtonText}>Back</Text>
+              <Text style={styles.backButtonText}>{t('back')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -668,7 +869,15 @@ export default function ChatScreen({ route, navigation }) {
 
       {isOffline && (
         <View style={styles.offlineBanner}>
-          <Text style={styles.offlineText}>📵 Offline - Messages will send when reconnected</Text>
+          <Text style={styles.offlineText}>{t('offline')}</Text>
+        </View>
+      )}
+      
+      {autoTranslateSettings.enabled && (
+        <View style={styles.autoTranslateBanner}>
+          <Text style={styles.autoTranslateText}>
+            🔄 Live Translation ON → {autoTranslateSettings.targetLanguage} ({autoTranslateSettings.formality})
+          </Text>
         </View>
       )}
 
@@ -689,7 +898,7 @@ export default function ChatScreen({ route, navigation }) {
               contentContainerStyle={styles.messagesList}
               ListEmptyComponent={
                 <Text style={styles.emptyText}>
-                  No messages yet. Start the conversation! 💬
+                  {t('noMessagesYetStartConversation') || 'No messages yet. Start the conversation! 💬'}
                 </Text>
               }
               onContentSizeChange={() => scrollToBottom()}
@@ -708,11 +917,12 @@ export default function ChatScreen({ route, navigation }) {
                 chatId={chatId}
                 messages={messages}
                 userProfiles={userProfiles}
+                onAutoTranslateChange={handleAutoTranslateChange}
                 currentUser={user}
               />
               <TextInput
                 style={styles.input}
-                placeholder="Type a message..."
+                placeholder={t('typeMessage')}
                 value={newMessage}
                 onChangeText={handleTyping}
                 multiline
@@ -727,7 +937,7 @@ export default function ChatScreen({ route, navigation }) {
                 onPress={handleSendMessage}
                 disabled={!newMessage.trim() || sendingPhoto}
               >
-                <Text style={styles.sendButtonText}>Send</Text>
+                <Text style={styles.sendButtonText}>{t('send')}</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -760,6 +970,17 @@ const styles = StyleSheet.create({
   offlineText: {
     color: '#fff',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  autoTranslateBanner: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  autoTranslateText: {
+    color: 'white',
+    fontSize: 12,
     fontWeight: '600',
   },
   title: {
