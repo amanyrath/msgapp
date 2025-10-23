@@ -419,7 +419,15 @@ export default function ChatScreen({ route, navigation }) {
 
   const chatTitle = useMemo(() => {
     if (!chatMembers?.length) return 'Chat';
-    const others = chatMembers.filter((id) => id !== user?.uid);
+    const currentUserId = user?.uid;
+    
+    // More robust filtering - ensure we're comparing strings and handle null/undefined
+    const others = chatMembers.filter((id) => {
+      const memberId = String(id || '').trim();
+      const currentId = String(currentUserId || '').trim();
+      return memberId && currentId && memberId !== currentId;
+    });
+    
     if (others.length === 0) return 'Personal Notes';
     
     // For 1-on-1 chats (2 members), always use the other user's name
@@ -440,7 +448,12 @@ export default function ChatScreen({ route, navigation }) {
 
   const chatPresenceText = useMemo(() => {
     if (!chatMembers?.length) return '';
-    const others = chatMembers.filter((id) => id !== user?.uid);
+    const currentUserId = user?.uid;
+    const others = chatMembers.filter((id) => {
+      const memberId = String(id || '').trim();
+      const currentId = String(currentUserId || '').trim();
+      return memberId && currentId && memberId !== currentId;
+    });
     if (others.length === 0) return '';
     
     // For 1-on-1 chats, show the user's presence

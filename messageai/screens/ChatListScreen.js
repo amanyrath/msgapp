@@ -171,7 +171,14 @@ export default function ChatListScreen({ navigation }) {
 
   const formatMemberNames = (chat) => {
     const members = chat.members || [];
-    const otherMembers = members.filter((id) => id !== user?.uid);
+    const currentUserId = user?.uid;
+    
+    // More robust filtering - ensure we're comparing strings and handle null/undefined
+    const otherMembers = members.filter((id) => {
+      const memberId = String(id || '').trim();
+      const currentId = String(currentUserId || '').trim();
+      return memberId && currentId && memberId !== currentId;
+    });
 
     if (otherMembers.length === 0) {
       return 'Personal Notes';
