@@ -2,7 +2,9 @@ import { translateText } from './aiService';
 import { shouldShowTranslationForChat } from './chatLanguageAnalysis';
 import { getCachedUserLanguagePreference } from './languageIntegration';
 
-// Cache for pre-generated translations
+// PRIVACY: Pre-generated translations are CLIENT-SIDE ONLY
+// These translations are personal assistance and should NEVER be synced between users
+// Each user's translations are private and don't affect what others see
 const proactiveTranslationCache = new Map();
 const CACHE_EXPIRY_TIME = 30 * 60 * 1000; // 30 minutes
 

@@ -13,6 +13,12 @@ import { getPreGeneratedTranslation } from '../utils/proactiveTranslation';
 
 /**
  * InlineTranslation - Shows "See translation" link below messages
+ * Supports progressive disclosure: translation first, then cultural context
+ * 
+ * PRIVACY: All translations are CLIENT-SIDE ONLY
+ * - Translation views are personal and private to each user
+ * - NO data is synced to Firestore or shared with other users
+ * - Each user sees their own personal translation overlays only
  * Expands to show translation + cultural context when tapped
  */
 export default function InlineTranslation({

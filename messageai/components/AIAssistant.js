@@ -18,6 +18,7 @@ import { processChatMessage, translateText, summarizeConversation } from '../uti
 import { buildAIContext, filterMessagesByTimeRange } from '../utils/aiContext';
 import { sendTranslationMessage, processBulkTranslation } from '../utils/aiFirestore';
 import { useLocalization } from '../context/LocalizationContext';
+import MessageSendApproval from './MessageSendApproval';
 
 /**
  * AIAssistant - Modal interface for AI interactions
@@ -30,7 +31,8 @@ export default function AIAssistant({
   messages = [],
   userProfiles = [],
   currentUser,
-  onAutoTranslateChange // New prop to communicate auto-translate state back to parent
+  onAutoTranslateChange, // New prop to communicate auto-translate state back to parent
+  onSendMessage // New prop to handle actual message sending to chat
 }) {
   const { languageName: userLanguage, t } = useLocalization();
   const [aiMessages, setAiMessages] = useState([]);
@@ -45,6 +47,10 @@ export default function AIAssistant({
   
   // Dropdown state
   const [showDropdown, setShowDropdown] = useState(false);
+  
+  // Message approval state
+  const [showApproval, setShowApproval] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState(null);
 
   // Initialize AI conversation with context - only when modal becomes visible
   useEffect(() => {

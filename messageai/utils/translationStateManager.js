@@ -1,5 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// PRIVACY: Translation states are CLIENT-SIDE ONLY
+// These are personal UI states and should NEVER be synced between users
+// Each user's translation views are private and don't affect other users
 const TRANSLATION_STATES_PREFIX = 'translation_states_';
 
 /**
