@@ -142,12 +142,21 @@ export const createOrGetChat = async (memberIds, metadata = {}) => {
  * @param {string} senderEmail - Sender's email
  * @param {string} text - Message text
  * @param {string} senderName - Sender's display name/nickname (optional)
+ * @param {object} metadata - Additional metadata (e.g. sentWithAI flag)
  * @returns {Promise<string>} - Message ID
  */
-export const sendMessage = async (chatId, senderId, senderEmail, text, senderName = null) => {
+export const sendMessage = async (chatId, senderId, senderEmail, text, senderName = null, metadata = {}) => {
   return retryOperation(async () => {
     try {
       const messagesRef = collection(db, 'chats', chatId, 'messages');
+      
+      // Filter out undefined values from metadata (Firestore doesn't support undefined)
+      const cleanMetadata = {};
+      for (const [key, value] of Object.entries(metadata)) {
+        if (value !== undefined) {
+          cleanMetadata[key] = value;
+        }
+      }
       
       const messageData = {
         senderId,
@@ -156,6 +165,7 @@ export const sendMessage = async (chatId, senderId, senderEmail, text, senderNam
         type: 'text',
         timestamp: serverTimestamp(),
         readBy: [senderId], // Sender has "read" their own message
+        ...cleanMetadata, // Spread only defined metadata values
       };
 
       // Add sender name if provided
