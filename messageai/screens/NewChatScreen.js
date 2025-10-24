@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useTranslation } from '../context/LocalizationContext';
 import {
   subscribeToUsers,
   createOrGetChat,
@@ -17,6 +18,7 @@ import {
 
 export default function NewChatScreen({ navigation }) {
   const { user } = useAuth();
+  const t = useTranslation();
   const [users, setUsers] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -58,30 +60,29 @@ export default function NewChatScreen({ navigation }) {
 
   const handleCreateChat = async () => {
     if (!selectedIds.length) {
-      Alert.alert('Select users', 'Please choose at least one person to start a chat.');
+      Alert.alert(t('selectUsers') || 'Select Users', t('pleaseSelectAtLeastOnePerson') || 'Please choose at least one person to start a chat.');
       return;
     }
 
     if (!user?.uid) {
-      Alert.alert('Error', 'You must be signed in to start a chat.');
+      Alert.alert(t('error'), t('mustBeSignedIn') || 'You must be signed in to start a chat.');
       return;
     }
 
     const memberIds = Array.from(new Set([...selectedIds, user.uid]));
 
-    const memberDisplayNames = memberIds.map((id) => {
+    // Only include OTHER users' names, not the current user's
+    const memberDisplayNames = selectedIds.map((id) => {
       const profile = userMap[id];
       if (profile?.nickname) return profile.nickname;
       if (profile?.displayName) return profile.displayName;
       if (profile?.email) return profile.email;
-      if (id === user.uid) return user.email || 'You';
       return id;
     });
 
-    const memberEmails = memberIds.map((id) => {
+    const memberEmails = selectedIds.map((id) => {
       const profile = userMap[id];
       if (profile?.email) return profile.email;
-      if (id === user.uid) return user.email || '';
       return '';
     });
 
@@ -97,7 +98,7 @@ export default function NewChatScreen({ navigation }) {
     if (memberIds.length >= 3) {
       const otherMembers = selectedIds.map((id) => {
         const profile = userMap[id];
-        return profile?.nickname || profile?.displayName || profile?.email || 'User';
+        return profile?.nickname || profile?.displayName || profile?.email || t('unknown');
       });
       metadata.name = otherMembers.join(' & ');
     }
@@ -108,7 +109,7 @@ export default function NewChatScreen({ navigation }) {
       navigation.replace('Chat', { chatId, members: memberIds, metadata });
     } catch (error) {
       console.error('Error creating chat:', error);
-      Alert.alert('Error', 'Failed to create chat: ' + error.message);
+      Alert.alert(t('error'), t('failedToCreateChat', { error: error.message }) || `Failed to create chat: ${error.message}`);
     } finally {
       setCreating(false);
     }
@@ -116,7 +117,7 @@ export default function NewChatScreen({ navigation }) {
 
   const renderUserItem = ({ item }) => {
     const isSelected = selectedIds.includes(item.id);
-    const displayName = item.displayName || item.email || 'Unknown user';
+    const displayName = item.displayName || item.email || t('unknown');
     const icon = item.icon || '👤';
 
     return (
@@ -144,9 +145,9 @@ export default function NewChatScreen({ navigation }) {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.cancelButton}>
-          <Text style={styles.cancelText}>Cancel</Text>
+          <Text style={styles.cancelText}>{t('cancel')}</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>New Chat</Text>
+        <Text style={styles.title}>{t('newChat') || 'New Chat'}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -164,9 +165,9 @@ export default function NewChatScreen({ navigation }) {
           }
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No other users yet</Text>
+              <Text style={styles.emptyTitle}>{t('noOtherUsersYet') || 'No other users yet'}</Text>
               <Text style={styles.emptySubtitle}>
-                Invite teammates so you can start a conversation.
+                {t('inviteTeammates') || 'Invite teammates so you can start a conversation.'}
               </Text>
             </View>
           }
@@ -185,7 +186,7 @@ export default function NewChatScreen({ navigation }) {
           <ActivityIndicator color="#fff" />
         ) : (
           <Text style={styles.createButtonText}>
-            Start Chat{selectedIds.length > 1 ? ' (' + (selectedIds.length + 1) + ')' : ''}
+            {t('startChat') || 'Start Chat'}{selectedIds.length > 1 ? ` (${selectedIds.length + 1})` : ''}
           </Text>
         )}
       </TouchableOpacity>

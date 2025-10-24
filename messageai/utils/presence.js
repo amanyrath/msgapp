@@ -142,14 +142,26 @@ export const subscribeToMultiplePresence = (userIds, callback) => {
 /**
  * Get human-readable presence status
  * @param {Object} presence - Presence data from RTDB
+ * @param {Function} t - Translation function (optional, defaults to English)
  * @returns {string} - Human-readable status
  */
-export const getPresenceText = (presence) => {
+export const getPresenceText = (presence, t = (key, params) => {
+  // Fallback translations if no translation function provided
+  const fallbacks = {
+    activeNow: 'Active now',
+    active1mAgo: 'Active 1m ago',
+    activeMinsAgo: 'Active {mins}m ago',
+    activeHoursAgo: 'Active {hours}h ago',
+    activeDaysAgo: 'Active {days}d ago',
+    lastSeenWeekAgo: 'Last seen over a week ago'
+  };
+  return params ? fallbacks[key]?.replace(`{${Object.keys(params)[0]}}`, Object.values(params)[0]) || key : fallbacks[key] || key;
+}) => {
   if (!presence) return '';
   
   // Only show "Active now" if user is actually online
   if (presence.state === 'online') {
-    return 'Active now';
+    return t('activeNow');
   }
   
   // For offline users, show last activity time
@@ -159,16 +171,16 @@ export const getPresenceText = (presence) => {
     const diffMs = now - lastChanged;
     const diffMins = Math.floor(diffMs / 60000);
     
-    if (diffMins < 1) return 'Active 1m ago';
-    if (diffMins < 60) return `Active ${diffMins}m ago`;
+    if (diffMins < 1) return t('active1mAgo');
+    if (diffMins < 60) return t('activeMinsAgo', { mins: diffMins });
     
     const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `Active ${diffHours}h ago`;
+    if (diffHours < 24) return t('activeHoursAgo', { hours: diffHours });
     
     const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return `Active ${diffDays}d ago`;
+    if (diffDays < 7) return t('activeDaysAgo', { days: diffDays });
     
-    return 'Last seen over a week ago';
+    return t('lastSeenWeekAgo');
   }
   
   return '';

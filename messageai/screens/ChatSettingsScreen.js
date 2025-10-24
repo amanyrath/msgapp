@@ -11,10 +11,12 @@ import {
   ScrollView,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useTranslation } from '../context/LocalizationContext';
 import { updateChatMetadata, subscribeToUsers } from '../utils/firestore';
 
 export default function ChatSettingsScreen({ route, navigation }) {
   const { user } = useAuth();
+  const t = useTranslation();
   const { chatId, chatData } = route.params;
   
   const [name, setName] = useState(chatData?.name || '');
@@ -37,35 +39,35 @@ export default function ChatSettingsScreen({ route, navigation }) {
 
   const handleSave = async () => {
     if (!chatId) {
-      Alert.alert('Error', 'Invalid chat ID');
+      Alert.alert(t('error'), t('invalidChatId') || 'Invalid chat ID');
       return;
     }
 
     // Validate name
     if (!name.trim()) {
-      Alert.alert('Error', 'Group name cannot be empty');
+      Alert.alert(t('error'), t('groupNameCannotBeEmpty') || 'Group name cannot be empty');
       return;
     }
 
     if (name.length > 50) {
-      Alert.alert('Error', 'Group name must be 50 characters or less');
+      Alert.alert(t('error'), t('groupNameTooLong') || 'Group name must be 50 characters or less');
       return;
     }
 
     // Validate icon (should be emoji, max 2 characters)
     if (!icon.trim()) {
-      Alert.alert('Error', 'Group icon cannot be empty');
+      Alert.alert(t('error'), t('groupIconCannotBeEmpty') || 'Group icon cannot be empty');
       return;
     }
 
     if (icon.length > 2) {
-      Alert.alert('Error', 'Icon should be an emoji (max 2 characters)');
+      Alert.alert(t('error'), t('iconShouldBeEmoji') || 'Icon should be an emoji (max 2 characters)');
       return;
     }
 
     // Validate notes length
     if (notes.length > 500) {
-      Alert.alert('Error', 'Notes must be 500 characters or less');
+      Alert.alert(t('error'), t('notesTooLong') || 'Notes must be 500 characters or less');
       return;
     }
 
@@ -77,38 +79,38 @@ export default function ChatSettingsScreen({ route, navigation }) {
         notes: notes.trim(),
       });
       
-      Alert.alert('Success', 'Group settings updated!', [
-        { text: 'OK', onPress: () => navigation.goBack() }
+      Alert.alert(t('success') || 'Success', t('groupSettingsUpdated') || 'Group settings updated!', [
+        { text: t('done'), onPress: () => navigation.goBack() }
       ]);
     } catch (error) {
       console.error('Error updating chat settings:', error);
-      Alert.alert('Error', 'Failed to update settings: ' + error.message);
+      Alert.alert(t('error'), t('failedToUpdateSettings', { error: error.message }) || `Failed to update settings: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   const getMembersList = () => {
-    if (!chatData?.members) return 'No members';
+    if (!chatData?.members) return t('noMembers') || 'No members';
     
     const memberNames = chatData.members
       .filter(id => id !== user?.uid)
       .map(id => {
         const profile = userProfiles.find(p => p.id === id);
-        return profile?.nickname || profile?.displayName || profile?.email || 'Unknown';
+        return profile?.nickname || profile?.displayName || profile?.email || t('unknown');
       })
       .join(', ');
     
-    return memberNames || 'Just you';
+    return memberNames || t('justYou') || 'Just you';
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.cancelButton}>
-          <Text style={styles.cancelText}>Cancel</Text>
+          <Text style={styles.cancelText}>{t('cancel')}</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Group Settings</Text>
+        <Text style={styles.title}>{t('groupSettings') || 'Group Settings'}</Text>
         <TouchableOpacity 
           onPress={handleSave} 
           style={[styles.saveButton, loading && styles.saveButtonDisabled]}
@@ -117,7 +119,7 @@ export default function ChatSettingsScreen({ route, navigation }) {
           {loading ? (
             <ActivityIndicator color="#007AFF" size="small" />
           ) : (
-            <Text style={styles.saveText}>Save</Text>
+            <Text style={styles.saveText}>{t('save')}</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -125,10 +127,10 @@ export default function ChatSettingsScreen({ route, navigation }) {
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* Group Name Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Group Name</Text>
+          <Text style={styles.sectionTitle}>{t('groupName') || 'Group Name'}</Text>
           <TextInput
             style={styles.textInput}
-            placeholder="Enter group name..."
+            placeholder={t('enterGroupName') || 'Enter group name...'}
             value={name}
             onChangeText={setName}
             maxLength={50}
@@ -139,7 +141,7 @@ export default function ChatSettingsScreen({ route, navigation }) {
 
         {/* Group Icon Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Group Icon</Text>
+          <Text style={styles.sectionTitle}>{t('groupIcon') || 'Group Icon'}</Text>
           <View style={styles.iconInputContainer}>
             <View style={styles.iconPreview}>
               <Text style={styles.iconPreviewText}>{icon}</Text>

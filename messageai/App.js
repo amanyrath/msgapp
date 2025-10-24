@@ -7,6 +7,8 @@ import * as Notifications from 'expo-notifications';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NetworkProvider } from './context/NetworkContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { LocalizationProvider } from './context/LocalizationContext';
+import UserLanguageInitializer from './components/UserLanguageInitializer';
 import ErrorBoundary from './components/ErrorBoundary';
 import { registerForPushNotifications } from './utils/notifications';
 import { Logger } from './utils/logger';
@@ -70,44 +72,48 @@ function Navigation() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef}>
-      <Stack.Navigator
-        screenOptions={{
-          headerShown: false,
-        }}
-      >
-        {user ? (
-          // User is signed in - show main app
-          <>
-            <Stack.Screen name="ChatList" component={ChatListScreen} />
-            <Stack.Screen name="NewChat" component={NewChatScreen} />
-            <Stack.Screen name="Chat" component={ChatScreen} />
-            <Stack.Screen name="ChatSettings" component={ChatSettingsScreen} />
-            <Stack.Screen name="Profile" component={ProfileScreen} />
-          </>
-        ) : (
-          // User is not signed in - show auth screens
-          <>
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="Signup" component={SignupScreen} />
-          </>
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    <UserLanguageInitializer>
+      <NavigationContainer ref={navigationRef}>
+        <Stack.Navigator
+          screenOptions={{
+            headerShown: false,
+          }}
+        >
+          {user ? (
+            // User is signed in - show main app
+            <>
+              <Stack.Screen name="ChatList" component={ChatListScreen} />
+              <Stack.Screen name="NewChat" component={NewChatScreen} />
+              <Stack.Screen name="Chat" component={ChatScreen} />
+              <Stack.Screen name="ChatSettings" component={ChatSettingsScreen} />
+              <Stack.Screen name="Profile" component={ProfileScreen} />
+            </>
+          ) : (
+            // User is not signed in - show auth screens
+            <>
+              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen name="Signup" component={SignupScreen} />
+            </>
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+    </UserLanguageInitializer>
   );
 }
 
 export default function App() {
   return (
     <ErrorBoundary>
-      <NetworkProvider>
-        <AuthProvider>
-          <NotificationProvider>
-            <Navigation />
-            <StatusBar style="auto" />
-          </NotificationProvider>
-        </AuthProvider>
-      </NetworkProvider>
+      <LocalizationProvider>
+        <NetworkProvider>
+          <AuthProvider>
+            <NotificationProvider>
+              <Navigation />
+              <StatusBar style="auto" />
+            </NotificationProvider>
+          </AuthProvider>
+        </NetworkProvider>
+      </LocalizationProvider>
     </ErrorBoundary>
   );
 }

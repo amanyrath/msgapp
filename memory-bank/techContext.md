@@ -76,17 +76,21 @@ messageai/
 ├── components/
 │   ├── AIAssistant.js     # AI Assistant modal interface
 │   ├── AIMenuButton.js    # AI-first menu button
+│   ├── UserLanguageInitializer.js # Language initialization component
 │   ├── PhotoPicker.js     # Photo sharing components
 │   └── ...                # Other UI components
 ├── utils/
 │   ├── aiService.js       # OpenAI integration & AI operations
 │   ├── aiContext.js       # RAG pipeline with conversation context
 │   ├── aiFirestore.js     # AI message storage and threading
+│   ├── localization.js    # Language detection & UI translation
+│   ├── languageIntegration.js # User language preference integration
 │   ├── firestore.js       # Firestore operations
 │   ├── presence.js        # Real-time presence system
 │   └── notifications.js   # Push notification handling
 ├── context/
 │   ├── AuthContext.js     # Authentication & user management
+│   ├── LocalizationContext.js # Language & UI translation management
 │   ├── NetworkContext.js  # Connection monitoring
 │   ├── PresenceContext.js # Multi-user presence
 │   └── NotificationContext.js # Notification management
@@ -185,6 +189,7 @@ const firebaseConfig = {
 
 ### AI & International Features Dependencies
 - `openai` - OpenAI API integration for AI features
+- `expo-localization` - System language detection and locale management
 - `expo-constants` - Environment variable handling for API keys
 - `expo-notifications` - Push notification support
 - `expo-image-picker` - Future image sharing capabilities
@@ -217,10 +222,11 @@ eas build --platform android
 ```
 
 ## Known Technical Debt
-1. **Hardcoded Firebase Config**: Should move to environment variables
-2. **No TypeScript**: Plain JavaScript for speed; could migrate later
-3. **No Testing**: No unit/integration tests; manual testing only
-4. **Basic Error Handling**: Need comprehensive error boundaries
+1. **Language Persistence Issue**: User language preferences don't persist across logout/login cycles
+2. **Hardcoded Firebase Config**: Should move to environment variables
+3. **No TypeScript**: Plain JavaScript for speed; could migrate later
+4. **No Testing**: No unit/integration tests; manual testing only
+5. **Basic Error Handling**: Need comprehensive error boundaries
 
 ## Useful Commands
 ```bash

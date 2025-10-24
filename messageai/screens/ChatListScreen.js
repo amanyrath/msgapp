@@ -11,18 +11,22 @@ import {
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
+import { useTranslation } from '../context/LocalizationContext';
 import { subscribeToUserChats, subscribeToUsers, deleteChat } from '../utils/firestore';
 import { subscribeToMultiplePresence, isUserOnline } from '../utils/presence';
+import subscriptionManager from '../utils/subscriptionManager';
 
 export default function ChatListScreen({ navigation }) {
   const { user, signOut } = useAuth();
   const { isOffline } = useNetwork();
+  const t = useTranslation();
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [userProfiles, setUserProfiles] = useState([]);
   const [presenceData, setPresenceData] = useState({});
   const [deletingChats, setDeletingChats] = useState(new Set());
 
+  // OPTIMIZED: Subscribe to user chats with caching and deduplication
   useEffect(() => {
     if (!user?.uid) {
       setChats([]);
@@ -31,31 +35,48 @@ export default function ChatListScreen({ navigation }) {
     }
 
     setLoading(true);
-    const unsubscribe = subscribeToUserChats(user.uid, (chatList) => {
-      setChats(chatList);
-      setLoading(false);
-    });
+    console.log('📱 ChatListScreen: Subscribing to user chats');
 
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
+    const unsubscribe = subscriptionManager.subscribe(
+      `user-chats-${user.uid}`,
+      (callback) => subscribeToUserChats(user.uid, callback),
+      (chatList) => {
+        console.log('💬 Received chat list:', chatList.length, 'chats');
+        setChats(chatList);
+        setLoading(false);
+      },
+      {
+        cache: true,
+        shared: true,
+        priority: 'high' // High priority for chat list
       }
-    };
+    );
+
+    return () => unsubscribe();
   }, [user?.uid]);
 
+  // OPTIMIZED: Subscribe to user profiles with global caching (shared by all components)
   useEffect(() => {
-    const unsubscribe = subscribeToUsers((profiles) => {
-      setUserProfiles(profiles);
-    });
+    console.log('👥 ChatListScreen: Subscribing to user profiles');
 
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
+    const unsubscribe = subscriptionManager.subscribe(
+      'user-profiles',
+      (callback) => subscribeToUsers(callback),
+      (profiles) => {
+        console.log('👤 Received user profiles:', profiles.length, 'users');
+        setUserProfiles(profiles);
+      },
+      {
+        cache: true,
+        shared: true, // This will be shared by ChatScreen and other components
+        priority: 'normal'
       }
-    };
+    );
+
+    return () => unsubscribe();
   }, []);
 
-  // Subscribe to presence for all users in chats
+  // OPTIMIZED: Subscribe to presence for chat list users with smart deduplication
   useEffect(() => {
     if (chats.length === 0) return;
 
@@ -73,15 +94,26 @@ export default function ChatListScreen({ navigation }) {
     
     if (userIdsArray.length === 0) return;
 
-    const unsubscribe = subscribeToMultiplePresence(userIdsArray, (data) => {
-      setPresenceData(data);
-    });
+    // Create a unique key for this set of users
+    const presenceKey = `presence-chatlist-${userIdsArray.sort().join(',')}`;
+    
+    console.log('🟢 ChatListScreen: Subscribing to presence for', userIdsArray.length, 'users');
 
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
+    const unsubscribe = subscriptionManager.subscribe(
+      presenceKey,
+      (callback) => subscribeToMultiplePresence(userIdsArray, callback),
+      (data) => {
+        console.log('📶 Received presence data for', Object.keys(data).length, 'users');
+        setPresenceData(data);
+      },
+      {
+        cache: true,
+        shared: false, // Chat list presence is specific to this user's chats
+        priority: 'normal'
       }
-    };
+    );
+
+    return () => unsubscribe();
   }, [chats, user?.uid]);
 
   const handleSignOut = async () => {
@@ -100,15 +132,15 @@ export default function ChatListScreen({ navigation }) {
     const chatTitle = formatMemberNames(chat);
     
     Alert.alert(
-      'Delete Chat',
-      `Are you sure you want to delete "${chatTitle}"?\n\nThis will permanently delete all messages and cannot be undone.`,
+      t('deleteChat'),
+      t('deleteChatConfirm', { chatTitle }),
       [
         {
-          text: 'Cancel',
+          text: t('cancel'),
           style: 'cancel',
         },
         {
-          text: 'Delete',
+          text: t('delete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -139,8 +171,8 @@ export default function ChatListScreen({ navigation }) {
               
               // Show error alert
               Alert.alert(
-                'Error',
-                `Failed to delete chat: ${error.message}`,
+                t('error'),
+                t('failedToDeleteChat', { error: error.message }),
                 [{ text: 'OK' }]
               );
             }
@@ -184,11 +216,11 @@ export default function ChatListScreen({ navigation }) {
       return 'Personal Notes';
     }
 
-    // Get names from user profiles (real-time data)
+    // Get names from user profiles (real-time data) - prioritize nickname
     const names = otherMembers.map((id) => {
       const profile = userProfileMap[id];
-      if (profile?.displayName) return profile.displayName;
       if (profile?.nickname) return profile.nickname;
+      if (profile?.displayName) return profile.displayName;
       if (profile?.email) return profile.email;
       return 'Unknown';
     });
@@ -273,7 +305,7 @@ export default function ChatListScreen({ navigation }) {
           <View style={styles.chatTextContainer}>
             <Text style={styles.chatTitle}>{chatTitle}</Text>
             <Text style={styles.chatSnippet} numberOfLines={1}>
-              {item.lastMessage || 'No messages yet'}
+              {item.lastMessage || t('noMessagesYet')}
             </Text>
           </View>
           <View style={styles.chatMetaContainer}>
@@ -302,7 +334,7 @@ export default function ChatListScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Chats</Text>
+        <Text style={styles.title}>{t('chats')}</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity onPress={handleProfile} style={styles.profileButton}>
             <Text style={styles.profileText}>⚙️</Text>
@@ -315,7 +347,7 @@ export default function ChatListScreen({ navigation }) {
 
       {isOffline && (
         <View style={styles.offlineBanner}>
-          <Text style={styles.offlineText}>📵 You're offline</Text>
+          <Text style={styles.offlineText}>{t('youreOffline')}</Text>
         </View>
       )}
 
@@ -330,9 +362,9 @@ export default function ChatListScreen({ navigation }) {
           renderItem={renderChatItem}
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No chats yet.</Text>
+              <Text style={styles.emptyText}>{t('noChatsYet')}</Text>
               <Text style={styles.emptySubtext}>
-                Start a conversation to see it appear here.
+                {t('startConversation')}
               </Text>
             </View>
           }

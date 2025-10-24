@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,8 @@ import {
   Alert,
   ActionSheetIOS,
   Platform,
-  Modal
+  Modal,
+  Animated
 } from 'react-native';
 import Constants from 'expo-constants';
 import { requestPhotoPermissions } from '../utils/photos';
@@ -25,14 +26,63 @@ export default function AIMenuButton({
   messages = [],
   userProfiles = [],
   currentUser,
-  onAutoTranslateChange // New prop to handle auto-translate state changes
+  onAutoTranslateChange, // Auto-translate state changes
+  languageDetected = false, // New prop to indicate different language detected
+  smartTextData = null, // Smart text data for assistance
+  onSmartTextPress // Callback when smart text assistance is needed
 }) {
   const [showAIAssistant, setShowAIAssistant] = useState(false);
   const t = useTranslation();
+  
+  // Golden glow animation for smart text detection
+  const glowAnim = useRef(new Animated.Value(0)).current;
+  
+  // Animate golden glow when language is detected
+  useEffect(() => {
+    console.log('🎨 AIMenuButton languageDetected changed to:', languageDetected);
+    if (languageDetected) {
+      console.log('🟡 Starting golden glow animation');
+      // Start pulsing golden glow
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(glowAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: false,
+          }),
+          Animated.timing(glowAnim, {
+            toValue: 0,
+            duration: 1000,
+            useNativeDriver: false,
+          }),
+        ])
+      ).start();
+    } else {
+      console.log('🔵 Stopping golden glow animation');
+      // Stop animation and reset
+      glowAnim.stopAnimation();
+      Animated.timing(glowAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [languageDetected]);
 
   const handlePress = async () => {
     if (disabled) return;
 
+    // If language detected, prioritize smart text assistance
+    if (languageDetected && smartTextData && onSmartTextPress) {
+      onSmartTextPress();
+      return;
+    }
+
+    // Normal behavior - show full menu
+    showFullMenu();
+  };
+
+  const showFullMenu = () => {
     // Show menu with AI as default and photo options
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
@@ -105,24 +155,54 @@ export default function AIMenuButton({
     }
   };
 
-  // Quick AI access (tap and hold or double tap)
+  // Long press behavior
   const handleLongPress = () => {
-    if (!disabled) {
+    if (disabled) return;
+    
+    if (languageDetected) {
+      // When golden, long press shows full menu
+      showFullMenu();
+    } else {
+      // When not golden, long press opens AI Assistant directly
       setShowAIAssistant(true);
     }
   };
 
+  // Create golden glow style
+  const glowStyle = {
+    shadowColor: '#FFD700', // Golden color
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: glowAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 0.8],
+    }),
+    shadowRadius: glowAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 8],
+    }),
+    elevation: glowAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [2, 8],
+    }),
+  };
+
+  const buttonStyle = languageDetected ? 
+    [styles.menuButton, styles.smartButton, glowStyle] : 
+    [styles.menuButton, disabled && styles.menuButtonDisabled];
+
   return (
     <View>
       <TouchableOpacity
-        style={[styles.menuButton, disabled && styles.menuButtonDisabled]}
         onPress={handlePress}
         onLongPress={handleLongPress}
         disabled={disabled}
+        activeOpacity={0.7}
       >
-        <Text style={[styles.menuButtonText, disabled && styles.menuButtonTextDisabled]}>
-          🤖
-        </Text>
+        <Animated.View style={buttonStyle}>
+          <Text style={[styles.menuButtonText, disabled && styles.menuButtonTextDisabled]}>
+            🤖
+          </Text>
+        </Animated.View>
       </TouchableOpacity>
 
       <Modal
@@ -154,6 +234,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,
+  },
+  smartButton: {
+    backgroundColor: '#FFD700', // Golden background when smart text detected
+    borderWidth: 2,
+    borderColor: '#FFA500', // Darker golden border
   },
   menuButtonDisabled: {
     backgroundColor: '#ccc',

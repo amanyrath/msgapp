@@ -10,44 +10,99 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
+  ActionSheetIOS,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useLocalization } from '../context/LocalizationContext';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { createUserProfile } from '../utils/firestore';
 import { setUserOnline } from '../utils/presence';
+import subscriptionManager from '../utils/subscriptionManager';
 
 export default function ProfileScreen({ navigation }) {
   const { user, signOut } = useAuth();
+  const { userLanguagePreference, setUserLanguagePreference, t } = useLocalization();
   const [nickname, setNickname] = useState('');
   const [icon, setIcon] = useState('');
+  const [languagePreference, setLanguagePreference] = useState('English');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingLanguage, setSavingLanguage] = useState(false);
+
+  // Available languages
+  const availableLanguages = [
+    'English',
+    'Spanish',
+    'French', 
+    'German',
+    'Italian',
+    'Portuguese',
+    'Japanese',
+    'Chinese',
+    'Korean',
+    'Arabic',
+    'Russian',
+    'Dutch',
+    'Swedish',
+    'Norwegian',
+    'Finnish'
+  ];
 
   useEffect(() => {
     loadProfile();
   }, [user?.uid]);
+
+  // Sync local language preference with context
+  useEffect(() => {
+    if (userLanguagePreference) {
+      setLanguagePreference(userLanguagePreference);
+    }
+  }, [userLanguagePreference]);
 
   const loadProfile = async () => {
     if (!user?.uid) return;
 
     try {
       setLoading(true);
-      const userRef = doc(db, 'users', user.uid);
-      const userSnap = await getDoc(userRef);
+      
+      // OPTIMIZED: Try to get from cached user profiles first (much faster)
+      const cachedProfiles = subscriptionManager.getCachedData('user-profiles');
+      let userData = null;
+      
+      if (cachedProfiles) {
+        const userProfile = cachedProfiles.find(profile => profile.id === user.uid);
+        if (userProfile) {
+          userData = userProfile;
+          console.log('🚀 Profile loaded from cache');
+        }
+      }
+      
+      // Fallback to Firestore if not in cache
+      if (!userData) {
+        console.log('📦 Profile not in cache, loading from Firestore');
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        
+        if (userSnap.exists()) {
+          userData = userSnap.data();
+        }
+      }
 
-      if (userSnap.exists()) {
-        const userData = userSnap.data();
+      if (userData) {
         setNickname(userData.nickname || userData.displayName || user.email?.split('@')[0] || '');
         setIcon(userData.icon || '👤');
+        setLanguagePreference(userData.languagePreference || 'English');
       } else {
         // Set defaults for users without profiles
         setNickname(user.email?.split('@')[0] || '');
         setIcon('👤');
+        setLanguagePreference('English');
       }
     } catch (error) {
       console.error('Error loading profile:', error);
-      Alert.alert('Error', 'Failed to load profile: ' + error.message);
+      Alert.alert(t('error'), t('failedToLoadProfile', { error: error.message }));
     } finally {
       setLoading(false);
     }
@@ -173,20 +228,89 @@ export default function ProfileScreen({ navigation }) {
     setIcon(randomEmoji);
   };
 
+  const handleLanguageSelection = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: [t('cancel'), ...availableLanguages],
+          cancelButtonIndex: 0,
+          title: t('selectLanguage')
+        },
+        (buttonIndex) => {
+          if (buttonIndex > 0) {
+            const selectedLanguage = availableLanguages[buttonIndex - 1];
+            handleLanguageChange(selectedLanguage);
+          }
+        }
+      );
+    } else {
+      // For Android, show alert with options
+      const languageOptions = availableLanguages.map(lang => ({
+        text: lang,
+        onPress: () => handleLanguageChange(lang)
+      }));
+      
+      Alert.alert(
+        t('selectLanguage'),
+        t('choosePreferredLanguage'),
+        [
+          { text: t('cancel'), style: 'cancel' },
+          ...languageOptions
+        ]
+      );
+    }
+  };
+
+  const handleLanguageChange = async (newLanguage) => {
+    if (!user?.uid) return;
+    
+    try {
+      setSavingLanguage(true);
+      console.log('Updating language preference:', newLanguage);
+      
+      // Update via localization context
+      const success = await setUserLanguagePreference(user.uid, newLanguage);
+      
+      if (success) {
+        setLanguagePreference(newLanguage);
+        // Give a brief moment for the UI to update with new translations
+        setTimeout(() => {
+          Alert.alert(
+            t('languageUpdated') || 'Language Updated',
+            `${t('languageChangedTo') || 'Language changed to'} ${newLanguage}. ${t('restartForFullEffect') || 'The interface has been updated immediately.'}`
+          );
+        }, 300);
+      } else {
+        Alert.alert(
+          t('error'),
+          t('failedToUpdateLanguage') || 'Failed to update language preference. Please try again.'
+        );
+      }
+    } catch (error) {
+      console.error('Error updating language:', error);
+      Alert.alert(
+        t('error'),
+        t('failedToUpdateLanguage') || 'Failed to update language preference. Please try again.'
+      );
+    } finally {
+      setSavingLanguage(false);
+    }
+  };
+
   const handleSave = async () => {
     // Validation
     if (!nickname || nickname.trim().length === 0) {
-      Alert.alert('Error', 'Please enter a nickname');
+      Alert.alert(t('error'), t('pleaseEnterNickname'));
       return;
     }
 
     if (nickname.length > 20) {
-      Alert.alert('Error', 'Nickname must be 20 characters or less');
+      Alert.alert(t('error'), t('nicknameTooLong'));
       return;
     }
 
     if (!icon || icon.trim().length === 0) {
-      Alert.alert('Error', 'Please enter an icon (emoji)');
+      Alert.alert(t('error'), t('pleaseEnterIcon'));
       return;
     }
 
@@ -213,18 +337,18 @@ export default function ProfileScreen({ navigation }) {
       }
 
       Alert.alert(
-        'Success',
-        'Profile updated! Your new nickname and icon will be visible immediately.',
+        t('success') || 'Success',
+        t('profileUpdated') || 'Profile updated! Your new nickname and icon will be visible immediately.',
         [
           {
-            text: 'OK',
+            text: t('done'),
             onPress: () => navigation.goBack(),
           },
         ]
       );
     } catch (error) {
       console.error('Error saving profile:', error);
-      Alert.alert('Error', 'Failed to save profile: ' + error.message);
+      Alert.alert(t('error'), t('failedToSaveProfile', { error: error.message }) || `Failed to save profile: ${error.message}`);
     } finally {
       setSaving(false);
     }
@@ -232,12 +356,12 @@ export default function ProfileScreen({ navigation }) {
 
   const handleSignOut = async () => {
     Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
+      t('signOut') || 'Sign Out',
+      t('areYouSureSignOut') || 'Are you sure you want to sign out?',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Sign Out',
+          text: t('signOut') || 'Sign Out',
           style: 'destructive',
           onPress: async () => {
             await signOut();
@@ -265,9 +389,9 @@ export default function ProfileScreen({ navigation }) {
       >
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Text style={styles.backText}>← Back</Text>
+            <Text style={styles.backText}>← {t('back')}</Text>
           </TouchableOpacity>
-          <Text style={styles.title}>Profile</Text>
+          <Text style={styles.title}>{t('profile') || 'Profile'}</Text>
           <View style={styles.headerSpacer} />
         </View>
 
@@ -279,32 +403,32 @@ export default function ProfileScreen({ navigation }) {
           </View>
 
           <View style={styles.infoSection}>
-            <Text style={styles.label}>Email</Text>
+            <Text style={styles.label}>{t('email')}</Text>
             <View style={styles.infoBox}>
               <Text style={styles.infoText}>{user?.email}</Text>
             </View>
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.label}>Nickname</Text>
+            <Text style={styles.label}>{t('nickname')}</Text>
             <TextInput
               style={styles.input}
-              placeholder="Enter your nickname"
+              placeholder={t('enterYourNickname') || 'Enter your nickname'}
               value={nickname}
               onChangeText={setNickname}
               autoCapitalize="words"
               maxLength={20}
               editable={!saving}
             />
-            <Text style={styles.hint}>This is how others will see you (max 20 characters)</Text>
+            <Text style={styles.hint}>{t('nicknameHint') || 'This is how others will see you (max 20 characters)'}</Text>
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.label}>Icon</Text>
+            <Text style={styles.label}>{t('iconPlaceholder') || 'Icon'}</Text>
             <View style={styles.inputRow}>
               <TextInput
                 style={[styles.input, styles.inputWithButton]}
-                placeholder="Enter an emoji (e.g., 😊 or 🚀)"
+                placeholder={t('enterEmoji') || 'Enter an emoji (e.g., 😊 or 🚀)'}
                 value={icon}
                 onChangeText={setIcon}
                 maxLength={2}
@@ -318,7 +442,35 @@ export default function ProfileScreen({ navigation }) {
                 <Text style={styles.randomButtonText}>🎲</Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.hint}>Your personal emoji avatar (or tap 🎲 for random)</Text>
+            <Text style={styles.hint}>{t('iconHint') || 'Your personal emoji avatar (or tap 🎲 for random)'}</Text>
+          </View>
+
+          {/* Language Preference Section */}
+          <View style={styles.section}>
+            <Text style={styles.label}>{t('languagePreference') || 'Language Preference'}</Text>
+            <TouchableOpacity
+              style={[styles.languageSelector, savingLanguage && styles.buttonDisabled]}
+              onPress={handleLanguageSelection}
+              disabled={savingLanguage}
+            >
+              <Text style={styles.languageSelectorText}>
+                {languagePreference} 
+              </Text>
+              <Text style={styles.languageSelectorArrow}>
+                {savingLanguage ? '⏳' : '▼'}
+              </Text>
+            </TouchableOpacity>
+            {savingLanguage ? (
+              <View style={styles.languageUpdatingContainer}>
+                <Text style={styles.languageUpdatingText}>
+                  🌐 {t('languageSettingsAdjusting') || 'Your language settings are adjusting...'}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.hint}>
+                {t('languagePreferenceHint') || 'Choose your preferred language for app interface and AI responses'}
+              </Text>
+            )}
           </View>
 
           <TouchableOpacity
@@ -329,7 +481,7 @@ export default function ProfileScreen({ navigation }) {
             {saving ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Save Changes</Text>
+              <Text style={styles.buttonText}>{t('saveChanges') || 'Save Changes'}</Text>
             )}
           </TouchableOpacity>
 
@@ -338,7 +490,7 @@ export default function ProfileScreen({ navigation }) {
             onPress={handleSignOut}
             disabled={saving}
           >
-            <Text style={styles.signOutButtonText}>Sign Out</Text>
+            <Text style={styles.signOutButtonText}>{t('signOut') || 'Sign Out'}</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -464,6 +616,40 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 6,
     marginLeft: 4,
+  },
+  languageUpdatingContainer: {
+    backgroundColor: '#E8F4FD',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#007AFF',
+  },
+  languageUpdatingText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  languageSelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    minHeight: 50,
+  },
+  languageSelectorText: {
+    fontSize: 16,
+    color: '#111',
+    fontWeight: '500',
+  },
+  languageSelectorArrow: {
+    fontSize: 14,
+    color: '#999',
   },
   button: {
     borderRadius: 10,

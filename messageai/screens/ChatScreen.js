@@ -16,7 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useNetwork } from '../context/NetworkContext';
 import { useNotifications } from '../context/NotificationContext';
-import { useTranslation } from '../context/LocalizationContext';
+import { useTranslation, useLocalization } from '../context/LocalizationContext';
 import {
   createOrGetChat,
   sendMessage,
@@ -39,17 +39,30 @@ import PhotoMessage from '../components/PhotoMessage';
 import TranslationMessage from '../components/TranslationMessage';
 import AIMenuButton from '../components/AIMenuButton';
 import TypingIndicator from '../components/TypingIndicator';
+import InlineTranslation from '../components/InlineTranslation';
+// Removed: import AITranslationMessage from '../components/AITranslationMessage';
+import SmartTextInput from '../components/SmartTextInput';
+import SmartTextAssistant from '../components/SmartTextAssistant';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 // AI imports moved to dynamic imports for better bundle splitting
 import subscriptionManager from '../utils/subscriptionManager';
 import { printSubscriptionAnalysis } from '../utils/subscriptionDebugger';
+import { shouldShowTranslationForChat } from '../utils/chatLanguageAnalysis';
+import { generateProactiveTranslations, estimateProactiveTranslationCost } from '../utils/proactiveTranslation';
+import { 
+  getTranslationState, 
+  setTranslationState, 
+  getTranslationStates,
+  isTranslationExpanded 
+} from '../utils/translationStateManager';
 
 export default function ChatScreen({ route, navigation }) {
   const { user } = useAuth();
   const { isOffline } = useNetwork();
   const { setActiveChatId } = useNotifications();
   const t = useTranslation();
+  const { userLanguagePreference } = useLocalization();
   const [chatId, setChatId] = useState(route?.params?.chatId ?? null);
   const [chatMembers, setChatMembers] = useState(route?.params?.members ?? []);
   const [chatMetadata, setChatMetadata] = useState(route?.params?.metadata ?? {});
@@ -74,6 +87,23 @@ export default function ChatScreen({ route, navigation }) {
   
   // Track processed messages to avoid re-translating
   const processedMessageIds = useRef(new Set());
+  
+  // Inline translation state
+  const [translationRecommendation, setTranslationRecommendation] = useState(null);
+  const [translationStates, setTranslationStates] = useState({});
+  const [userLanguage, setUserLanguage] = useState('English');
+  
+  // Proactive translation state
+  const [preGeneratedTranslations, setPreGeneratedTranslations] = useState({});
+  const [proactiveTranslationLoading, setProactiveTranslationLoading] = useState(false);
+  
+  // Active AI translation messages
+  const [activeAITranslations, setActiveAITranslations] = useState(new Set());
+  
+  // Smart text assistant state
+  const [smartAssistantVisible, setSmartAssistantVisible] = useState(false);
+  const [smartTextData, setSmartTextData] = useState(null);
+  const [languageDetection, setLanguageDetection] = useState({ detected: false, language: null });
   
   // Clear processed message IDs when chat changes
   useEffect(() => {
@@ -175,6 +205,127 @@ export default function ChatScreen({ route, navigation }) {
       // Don't show error to user for auto-translations, just log it
     }
   }, [autoTranslateSettings, user, chatId]); // Dependencies: only re-create when these values change
+  
+  // Load translation states when chat changes
+  useEffect(() => {
+    if (!chatId) return;
+    
+    const loadTranslationStates = async () => {
+      try {
+        const states = await getTranslationState(chatId);
+        setTranslationStates(states);
+        console.log('🚀 Translation states loaded for chat:', chatId);
+      } catch (error) {
+        console.error('Error loading translation states:', error);
+      }
+    };
+    
+    loadTranslationStates();
+  }, [chatId]);
+  
+  // Simplified translation setup - always show buttons for all foreign messages
+  useEffect(() => {
+    if (!chatId || !user?.uid || messages.length === 0) {
+      console.log('🚫 Skipping proactive translation:', { chatId, userId: user?.uid, messageCount: messages.length });
+      return;
+    }
+    
+    const handleProactiveTranslation = async () => {
+      console.log('🚀 Starting proactive translation analysis...');
+      try {
+        setProactiveTranslationLoading(true);
+        
+        // First, analyze if we need translations at all
+        const recommendation = await shouldShowTranslationForChat(
+          chatId, 
+          messages, 
+          user.uid,
+          { forceRefresh: false }
+        );
+        
+        console.log('🔍 Translation recommendation result:', recommendation);
+        // Always enable translation buttons regardless of recommendation
+        // Use the user's preferred language from LocalizationContext
+        const targetLanguage = userLanguagePreference || 'English';
+        console.log('🌍 Using user language preference:', targetLanguage, 'from LocalizationContext');
+        console.log('📝 Setting up translations with target language:', targetLanguage);
+        setTranslationRecommendation({ shouldShow: true, userLanguage: targetLanguage, targetLanguage });
+        setUserLanguage(targetLanguage);
+        
+        if (false) { // Disable complex logic - always show buttons
+          console.log('🎯 Chat needs translations, generating proactively...');
+          
+          // Estimate cost before proceeding
+          const costEstimate = estimateProactiveTranslationCost(messages, user.uid);
+          console.log('💰 Proactive translation cost estimate:', costEstimate.formattedCost, 'for', costEstimate.messagesToTranslate, 'messages');
+          
+          // Generate proactive translations for last 15 messages
+          const proactiveResult = await generateProactiveTranslations(
+            chatId,
+            messages.slice(-15), // Last 15 messages
+            user.uid,
+            { forceRefresh: false }
+          );
+          
+          if (proactiveResult.success && proactiveResult.preGeneratedTranslations) {
+            setPreGeneratedTranslations(proactiveResult.preGeneratedTranslations);
+            console.log('✅ Proactive translations ready:', proactiveResult.translationsGenerated, 'generated,', Object.keys(proactiveResult.preGeneratedTranslations).length, 'total available');
+          } else {
+            console.log('ℹ️ No proactive translations needed:', proactiveResult.reason);
+          }
+        } else {
+          console.log('🚫 Complex translation analysis disabled - showing all buttons');
+          // Keep any existing translations or set empty
+          setPreGeneratedTranslations({});
+        }
+      } catch (error) {
+        console.error('Error in proactive translation:', error);
+      } finally {
+        setProactiveTranslationLoading(false);
+      }
+    };
+    
+    // Debounce to avoid excessive API calls when messages are loading
+    const timer = setTimeout(handleProactiveTranslation, 1500);
+    return () => clearTimeout(timer);
+  }, [messages, chatId, user?.uid]);
+  
+  // Handle translation toggle (now shows/hides AI translation messages)
+  const handleTranslationToggle = useCallback(async (messageId, isExpanded) => {
+    try {
+      // Update state persistence
+      await setTranslationState(chatId, messageId, isExpanded);
+      setTranslationStates(prev => {
+        const newStates = { ...prev };
+        if (isExpanded) {
+          newStates[messageId] = { expanded: true, timestamp: Date.now() };
+        } else {
+          delete newStates[messageId];
+        }
+        return newStates;
+      });
+      
+      // Update active AI translations set
+      setActiveAITranslations(prev => {
+        const newSet = new Set(prev);
+        if (isExpanded) {
+          newSet.add(messageId);
+        } else {
+          newSet.delete(messageId);
+        }
+        return newSet;
+      });
+      
+      console.log('🔄 AI translation toggle for message:', messageId, isExpanded ? 'shown' : 'hidden');
+    } catch (error) {
+      console.error('Error toggling AI translation:', error);
+    }
+  }, [chatId]);
+  
+  // Handle hiding AI translation
+  const handleHideAITranslation = useCallback((messageId) => {
+    handleTranslationToggle(messageId, false);
+  }, [handleTranslationToggle]);
   
   // Filter out current user from typing users
   const othersTypingUsers = useMemo(() => {
@@ -373,6 +524,37 @@ export default function ChatScreen({ route, navigation }) {
     };
   }, [user, chatId]);
 
+  // Clear translation states when leaving the chat
+  useFocusEffect(
+    useCallback(() => {
+      // This runs when the screen comes into focus
+      return () => {
+        // This cleanup runs when the screen loses focus (user navigates away)
+        console.log('🧹 Clearing translation states on chat exit (including AsyncStorage)');
+        setTranslationStates({});
+        setActiveAITranslations(new Set());
+        
+        // Also clear AsyncStorage states for this chat
+        if (chatId) {
+          import('../utils/translationStateManager').then(({ clearAllTranslationStates }) => {
+            clearAllTranslationStates(chatId).catch(err => 
+              console.log('⚠️ Failed to clear AsyncStorage states:', err)
+            );
+          });
+        }
+      };
+    }, [chatId])
+  );
+
+  // Also clear states when component unmounts
+  useEffect(() => {
+    return () => {
+      console.log('🧹 Clearing translation states on component unmount');
+      setTranslationStates({});
+      setActiveAITranslations(new Set());
+    };
+  }, []);
+
   // OPTIMIZED: Subscribe to chat metadata changes with deduplication
   useEffect(() => {
     if (!chatId) return;
@@ -463,6 +645,34 @@ export default function ChatScreen({ route, navigation }) {
       // Clear typing immediately if input is empty
       clearUserTyping(user.uid, chatId);
     }
+  };
+
+  // Handle language detection from SmartTextInput
+  const handleLanguageDetection = (detectionData) => {
+    console.log('🔍 Language detection callback received:', detectionData);
+    setLanguageDetection(detectionData);
+    
+    // If different language detected, prepare smart text data
+    if (detectionData.detected && detectionData.language) {
+      console.log('✅ Setting up smart text data for:', detectionData.language);
+      setSmartTextData({
+        text: detectionData.text,
+        detectedLanguage: {
+          language: detectionData.language,
+          confidence: detectionData.confidence
+        },
+        userNativeLanguage: userLanguagePreference || userLanguage
+      });
+    } else {
+      console.log('❌ No smart text data - clearing');
+      setSmartTextData(null);
+    }
+  };
+
+  // Handle text update from smart assistant
+  const handleSmartTextUpdate = (newText) => {
+    setNewMessage(newText);
+    setSmartAssistantVisible(false);
   };
 
   const handleSendMessage = async () => {
@@ -682,6 +892,11 @@ export default function ChatScreen({ route, navigation }) {
     });
   };
 
+  // Use original messages without AI message insertion (now handled inline)
+  const getDisplayMessages = useCallback(() => {
+    return messages;
+  }, [messages]);
+
   // Memoized message renderer for better performance
   const renderMessage = useCallback(({ item }) => {
     const isMyMessage = item.senderId === user.uid;
@@ -709,6 +924,8 @@ export default function ChatScreen({ route, navigation }) {
       }
     }
 
+    // Removed: AI translation messages now handled inline within regular messages
+    
     // Render AI messages differently
     if (item.type === 'ai') {
       return (
@@ -803,6 +1020,24 @@ export default function ChatScreen({ route, navigation }) {
           >
             {item.text}
           </Text>
+          
+          {/* iOS-Style Inline Translation beneath message */}
+          {!isMyMessage && 
+           translationRecommendation?.shouldShow && 
+           item.text && 
+           item.text.trim().length > 0 && (
+            <InlineTranslation
+              messageId={item.id}
+              messageText={item.text}
+              userLanguage={userLanguage}
+              chatLanguage={translationRecommendation?.chatLanguage || 'Unknown'}
+              chatId={chatId}
+              preGeneratedTranslations={preGeneratedTranslations}
+              translationState={translationStates[item.id]}
+              onToggle={handleTranslationToggle}
+            />
+          )}
+          
           <View style={styles.messageFooter}>
             <Text
               style={[
@@ -824,6 +1059,7 @@ export default function ChatScreen({ route, navigation }) {
             )}
           </View>
         </View>
+        {/* Translation button now moved inside message bubble above */}
       </View>
     );
   }, [user?.uid, getDisplayName, chatMembers, formatTime]); // Dependencies for renderMessage
@@ -892,10 +1128,10 @@ export default function ChatScreen({ route, navigation }) {
           <>
             <FlatList
               ref={flatListRef}
-              data={messages}
+              data={getDisplayMessages()}
               renderItem={renderMessage}
               keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.messagesList}
+              contentContainerStyle={[styles.messagesList, { paddingBottom: 20 }]}
               ListEmptyComponent={
                 <Text style={styles.emptyText}>
                   {t('noMessagesYetStartConversation') || 'No messages yet. Start the conversation! 💬'}
@@ -919,12 +1155,17 @@ export default function ChatScreen({ route, navigation }) {
                 userProfiles={userProfiles}
                 onAutoTranslateChange={handleAutoTranslateChange}
                 currentUser={user}
+                smartTextData={smartTextData}
+                languageDetected={languageDetection.detected}
+                onSmartTextPress={() => setSmartAssistantVisible(true)}
               />
-              <TextInput
+              <SmartTextInput
                 style={styles.input}
                 placeholder={t('typeMessage')}
                 value={newMessage}
                 onChangeText={handleTyping}
+                onLanguageDetected={handleLanguageDetection}
+                userNativeLanguage={userLanguagePreference || userLanguage}
                 multiline
                 maxLength={1000}
                 editable={!sendingPhoto}
@@ -942,6 +1183,14 @@ export default function ChatScreen({ route, navigation }) {
             </View>
           </>
         )}
+        
+        {/* Smart Text Assistant Modal */}
+        <SmartTextAssistant
+          visible={smartAssistantVisible}
+          onClose={() => setSmartAssistantVisible(false)}
+          textData={smartTextData}
+          onTextUpdate={handleSmartTextUpdate}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1038,7 +1287,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   messageBubble: {
-    maxWidth: '75%',
+    maxWidth: '80%', // Increased from 75% for better side positioning
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
@@ -1125,11 +1374,13 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20, // More buffer space at bottom
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
+    minHeight: 80, // Taller minimum height for better UX
   },
   input: {
     flex: 1,
@@ -1157,5 +1408,36 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Translation button positioning
+  translationButtonContainer: {
+    marginLeft: 16,
+    marginRight: 16,
+    marginTop: 4,
+  },
+  seeTranslationButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    borderRadius: 16,
+    marginLeft: 0,
+  },
+  seeTranslationText: {
+    color: '#007AFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  inlineTranslationButton: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    marginBottom: 4,
+    paddingHorizontal: 0,
+    paddingVertical: 2,
+  },
+  inlineTranslationText: {
+    color: '#007AFF',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });

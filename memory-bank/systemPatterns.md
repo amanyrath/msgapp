@@ -11,7 +11,8 @@ MessageAI is a full-featured **International Communicator** with AI-powered capa
 │  • Screens (ChatList, Chat, NewChat, Auth)  │
 │  • AI Components (AIAssistant, AIMenuButton)│
 │  • Context Providers (Auth, Network,        │
-│    Presence, Notification, Error Boundary)  │
+│    Presence, Notification, Localization,    │
+│    Error Boundary)                          │
 │  • Utils (Firestore, Presence, AI Services) │
 │  • Firebase SDK (Auth, Firestore, RTDB)     │
 │  • OpenAI SDK (GPT-4o mini integration)     │
@@ -40,8 +41,9 @@ MessageAI is a full-featured **International Communicator** with AI-powered capa
 App.js (Root)
 ├── ErrorBoundary (Global error handling)
 │   └── NetworkProvider (Connection monitoring)
-│       └── AuthProvider (Auth + presence tracking)
-│           └── Navigation Stack
+│       └── LocalizationProvider (Language & UI translation)
+│           └── AuthProvider (Auth + presence tracking)
+│               └── Navigation Stack
 │               ├── Auth Flow (unauthenticated)
 │               │   ├── LoginScreen
 │               │   └── SignupScreen
@@ -134,7 +136,7 @@ App.js (Root)
 ## Design Patterns in Use
 
 ### 1. Context Provider Pattern
-**Where**: AuthContext, NetworkContext, PresenceContext  
+**Where**: AuthContext, NetworkContext, PresenceContext, LocalizationContext  
 **Purpose**: Global state management without prop drilling  
 **Benefits**: Clean, predictable, easy to test
 
@@ -147,6 +149,9 @@ const { isOffline } = useNetwork();
 
 // Provides: presenceData
 const { presenceData } = usePresence([userId1, userId2]);
+
+// Provides: t, strings, translateText, setUserLanguagePreference
+const { t, strings, isLoading } = useLocalization();
 ```
 
 ### 2. Real-time Listener Pattern
@@ -268,6 +273,38 @@ const context = buildAIContext({
 await updateDoc(messageRef, {
   readBy: arrayUnion(userId)
 });
+```
+
+### 11. Language Localization Pattern
+**Where**: LocalizationContext, UI string translation  
+**Purpose**: Dynamic UI translation with caching  
+**Implementation**:
+```javascript
+// Translation with caching
+const { t, translateText } = useLocalization();
+
+// Predefined UI strings
+const welcomeText = t('welcome');
+
+// Dynamic text translation
+const translatedMessage = await translateText('Hello world');
+
+// Parameterized strings
+const greeting = t('hello', { name: 'John' });
+```
+
+### 12. User Language Preference Pattern
+**Where**: User profiles, language persistence  
+**Purpose**: Store and restore user language choices  
+**Implementation**:
+```javascript
+// Save language preference
+await setUserLanguagePreference(userId, 'Spanish');
+
+// Initialize user language on login
+await initializeUserLanguage(userId);
+
+// Language persists across sessions
 ```
 
 ## Data Flow Patterns
@@ -418,6 +455,29 @@ Check if all recipients have read
 Update indicator: ✓ → ✓✓
 ```
 
+### Language Preference Persistence Flow (CURRENT ISSUE)
+```
+User selects language preference in ProfileScreen
+    ↓
+setUserLanguagePreference(userId, language) called  
+    ↓
+Language saved to user profile in Firestore
+    ↓
+LocalizationContext state updated
+    ↓
+UI translations loaded for new language
+    ↓
+User logs out
+    ↓
+User logs in (ISSUE: language not restored)
+    ↓
+AuthContext initializes but doesn't trigger language loading
+    ↓
+App defaults to system language (not user preference)
+    ↓
+❌ User must reconfigure language choice
+```
+
 ### Offline Sync Flow
 ```
 User goes offline
@@ -455,6 +515,9 @@ UI updates across all devices
   icon: string,          // User's emoji avatar
   createdAt: timestamp,  // Account creation time
   updatedAt: timestamp,  // Last profile update
+  
+  // Language Preference (NEW!)
+  languagePreference: string,  // User's preferred UI language (e.g., 'Spanish', 'French')
   
   // AI Preferences (future enhancement)
   preferences: {

@@ -8,6 +8,7 @@ import {
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { createUserProfile } from '../utils/firestore';
+import { getSystemLanguage, getLanguageName } from '../utils/localization';
 import { setUserOnline, setUserOffline } from '../utils/presence';
 
 const AuthContext = createContext({});
@@ -61,10 +62,15 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // Sign up with email and password
-  const signUp = async (email, password, nickname, icon) => {
+  const signUp = async (email, password, nickname, icon, selectedLanguage) => {
     try {
       setError(null);
       setLoading(true);
+      
+      // Detect system language for reference, but use selected language
+      const systemLanguage = getSystemLanguage();
+      const languagePreference = selectedLanguage || getLanguageName(systemLanguage);
+      
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       await createUserProfile(
         userCredential.user.uid,
@@ -73,10 +79,12 @@ export const AuthProvider = ({ children }) => {
           displayName: nickname,
           nickname,
           icon,
+          languagePreference: languagePreference, // Store user's selected language preference
+          systemLanguage: systemLanguage, // Store detected system language for reference
         },
         { setCreatedAt: true }
       );
-      console.log('Sign up successful:', userCredential.user.email);
+      console.log('Sign up successful:', userCredential.user.email, 'Language:', languagePreference);
       return { success: true };
     } catch (error) {
       console.error('Sign up error:', error.message);

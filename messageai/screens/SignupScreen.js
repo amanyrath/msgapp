@@ -9,8 +9,10 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  ActionSheetIOS,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useTranslation } from '../context/LocalizationContext';
 
 export default function SignupScreen({ navigation }) {
   const [email, setEmail] = useState('');
@@ -18,8 +20,31 @@ export default function SignupScreen({ navigation }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [nickname, setNickname] = useState('');
   const [icon, setIcon] = useState('');
+  const [language, setLanguage] = useState('English');
   const [isLoading, setIsLoading] = useState(false);
   const { signUp } = useAuth();
+  const t = useTranslation();
+
+  // Available languages
+  const availableLanguages = [
+    'English',
+    'Spanish',
+    'French', 
+    'German',
+    'Italian',
+    'Portuguese',
+    'Japanese',
+    'Chinese',
+    'Korean',
+    'Arabic',
+    'Russian',
+    'Dutch',
+    'Swedish',
+    'Norwegian',
+    'Finnish'
+  ];
+
+  // Language defaults to English - no need for useEffect since it's already set in useState
 
   const getRandomEmoji = () => {
     const emojis = [
@@ -141,44 +166,71 @@ export default function SignupScreen({ navigation }) {
     setIcon(randomEmoji);
   };
 
+  const showLanguagePicker = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', ...availableLanguages],
+          cancelButtonIndex: 0,
+          title: t('selectLanguage') || 'Select Language',
+        },
+        (buttonIndex) => {
+          if (buttonIndex > 0) {
+            setLanguage(availableLanguages[buttonIndex - 1]);
+          }
+        }
+      );
+    } else {
+      // For Android, we can use Alert.alert as a simple picker
+      Alert.alert(
+        t('selectLanguage') || 'Select Language',
+        t('choosePreferredLanguage') || 'Choose your preferred language',
+        availableLanguages.map(lang => ({
+          text: lang,
+          onPress: () => setLanguage(lang)
+        })).concat([{ text: 'Cancel', style: 'cancel' }])
+      );
+    }
+  };
+
   const handleSignup = async () => {
     // Validation
     if (!email || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert(t('error'), t('pleaseFillAllFields'));
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      Alert.alert(t('error'), t('passwordsDoNotMatch'));
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+      Alert.alert(t('error'), t('passwordTooShort'));
       return;
     }
 
     if (!nickname || nickname.trim().length === 0) {
-      Alert.alert('Error', 'Please enter a nickname');
+      Alert.alert(t('error'), t('pleaseEnterNickname'));
       return;
     }
 
     if (nickname.length > 20) {
-      Alert.alert('Error', 'Nickname must be 20 characters or less');
+      Alert.alert(t('error'), t('nicknameTooLong'));
       return;
     }
 
     if (!icon || icon.trim().length === 0) {
-      Alert.alert('Error', 'Please enter an icon (emoji)');
+      Alert.alert(t('error'), t('pleaseEnterIcon'));
       return;
     }
 
     setIsLoading(true);
-    const result = await signUp(email, password, nickname.trim(), icon.trim());
+    const result = await signUp(email, password, nickname.trim(), icon.trim(), language);
     setIsLoading(false);
 
     if (!result.success) {
-      Alert.alert('Sign Up Failed', result.error);
+      Alert.alert(t('signupFailed'), result.error);
     }
     // If successful, onAuthStateChanged will automatically navigate to chat
   };
@@ -189,13 +241,13 @@ export default function SignupScreen({ navigation }) {
       style={styles.container}
     >
       <View style={styles.content}>
-        <Text style={styles.title}>MessageAI</Text>
-        <Text style={styles.subtitle}>Create your account</Text>
+        <Text style={styles.title}>{t('appName')}</Text>
+        <Text style={styles.subtitle}>{t('createAccount')}</Text>
 
         <View style={styles.form}>
           <TextInput
             style={styles.input}
-            placeholder="Email"
+            placeholder={t('email')}
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
@@ -206,7 +258,7 @@ export default function SignupScreen({ navigation }) {
 
           <TextInput
             style={styles.input}
-            placeholder="Nickname"
+            placeholder={t('nickname')}
             value={nickname}
             onChangeText={setNickname}
             autoCapitalize="words"
@@ -217,7 +269,7 @@ export default function SignupScreen({ navigation }) {
           <View style={styles.inputRow}>
             <TextInput
               style={[styles.input, styles.inputWithButton]}
-              placeholder="Icon (emoji, e.g., 😊 or 🚀)"
+              placeholder={t('iconPlaceholder')}
               value={icon}
               onChangeText={setIcon}
               maxLength={2}
@@ -232,9 +284,23 @@ export default function SignupScreen({ navigation }) {
             </TouchableOpacity>
           </View>
 
+          <TouchableOpacity
+            style={styles.languagePicker}
+            onPress={showLanguagePicker}
+            disabled={isLoading}
+          >
+            <Text style={styles.languagePickerLabel}>
+              {t('language') || 'Language'}
+            </Text>
+            <View style={styles.languagePickerValue}>
+              <Text style={styles.languagePickerText}>{language}</Text>
+              <Text style={styles.chevron}>›</Text>
+            </View>
+          </TouchableOpacity>
+
           <TextInput
             style={styles.input}
-            placeholder="Password"
+            placeholder={t('password')}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -246,7 +312,7 @@ export default function SignupScreen({ navigation }) {
 
           <TextInput
             style={styles.input}
-            placeholder="Confirm Password"
+            placeholder={t('confirmPassword')}
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry
@@ -264,7 +330,7 @@ export default function SignupScreen({ navigation }) {
             {isLoading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Sign Up</Text>
+              <Text style={styles.buttonText}>{t('signup')}</Text>
             )}
           </TouchableOpacity>
 
@@ -274,7 +340,7 @@ export default function SignupScreen({ navigation }) {
             disabled={isLoading}
           >
             <Text style={styles.secondaryButtonText}>
-              Already have an account? Log In
+              {t('alreadyHaveAccount')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -360,6 +426,36 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: '#007AFF',
     fontSize: 16,
+  },
+  languagePicker: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  languagePickerLabel: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  languagePickerValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  languagePickerText: {
+    fontSize: 16,
+    color: '#333',
+    marginRight: 5,
+  },
+  chevron: {
+    fontSize: 18,
+    color: '#999',
+    transform: [{ rotate: '90deg' }],
   },
 });
 

@@ -5,9 +5,17 @@
 **Phase**: Full AI-Powered International Communicator Complete  
 **Achievement**: 30/30 points on AI Features Rubric  
 **Project Status**: Production-Ready International Communication App  
-**Date**: October 22, 2025
+**Date**: October 23, 2025
 
-### What We Just Completed (October 22, 2025)
+### What We Just Completed (October 23, 2025)
+
+**🎉 CRITICAL BUG FIXES & ENHANCEMENTS** ✅ (COMPLETE!)
+- **Chat Title Display Fixed**: 1-on-1 chats now correctly show other user's name instead of current user's name
+- **Language Persistence Fixed**: User language preferences now persist across logout/login cycles 
+- **AI Popup Translation Fixed**: "Take Photo", "Choose Photo", "AI Assistant" options now properly translated
+- **Enhanced User Experience**: All UI components now respect user's selected language preferences
+
+### Previous Major Completion (October 22, 2025)
 
 **🎉 ALL INTERNATIONAL COMMUNICATOR AI FEATURES** ✅ (COMPLETE!)
 - **Real-time Translation**: GPT-4o mini with sub-2s responses, automatic language detection, bulk translation
@@ -201,13 +209,17 @@ The MessageAI International Communicator is now a production-ready application t
 ### Recent Bug Fixes
 
 - Fixed Firebase duplicate initialization error
-- Fixed chat names showing self instead of other users
 - Removed hardcoded initialRouteName to fix navigation
 - Disabled iOS strong password suggestions
 - Fixed RTDB emulator port conflicts
 - Removed corrupted Git pack files
 - Fixed offline persistence conflict with emulators
 - **FIXED**: Naming conflict in subscribeToMessages causing "limit is not a function" error (Oct 21, 2025)
+- **FIXED**: Chat titles showing current user's name instead of other user's name in 1-on-1 chats (Oct 23, 2025)
+- **FIXED**: Language persistence bug preventing user preferences from loading on login (Oct 23, 2025)
+- **FIXED**: AI Assistant popup options not being translated ("Take Photo", "Choose Photo", etc.) (Oct 23, 2025)
+- **FIXED**: Language persistence priority issue - stored account language now takes precedence over system language (Oct 23, 2025)
+- **ENHANCED**: Language change UX with prominent "Your language settings are adjusting..." message during preference updates (Oct 23, 2025)
 
 ### Firebase Setup Required
 
@@ -348,9 +360,9 @@ firebase deploy --only database,firestore
 
 ### Next Session Priorities
 
-1. Build Android APK with EAS Build
-2. Test on real devices (both Android and iOS via Expo Go)
-3. **Complete MVP!** 🎉
-4. Share with testers and get feedback
-5. Optional enhancements: Typing indicators, better unread counts, background notifications
+1. **Build Android APK** (`eas build --platform android --profile preview`)
+2. **Test on real devices** (Android + iOS via Expo Go)
+3. **Share with testers** (get feedback)
+4. **Performance Testing**: Validate sub-2s response times under load
+5. **COMPLETE MVP!** 🎉
 

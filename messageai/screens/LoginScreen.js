@@ -11,16 +11,18 @@ import {
   Alert,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useTranslation } from '../context/LocalizationContext';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { signIn } = useAuth();
+  const t = useTranslation();
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please enter both email and password');
+      Alert.alert(t('error'), t('pleaseFillAllFields'));
       return;
     }
 
@@ -29,7 +31,7 @@ export default function LoginScreen({ navigation }) {
     setIsLoading(false);
 
     if (!result.success) {
-      Alert.alert('Login Failed', result.error);
+      Alert.alert(t('loginFailed'), result.error);
     }
   };
 
@@ -39,13 +41,13 @@ export default function LoginScreen({ navigation }) {
       style={styles.container}
     >
       <View style={styles.content}>
-        <Text style={styles.title}>MessageAI</Text>
-        <Text style={styles.subtitle}>Welcome back!</Text>
+        <Text style={styles.title}>{t('appName')}</Text>
+        <Text style={styles.subtitle}>{t('welcomeBack')}</Text>
 
         <View style={styles.form}>
           <TextInput
             style={styles.input}
-            placeholder="Email"
+            placeholder={t('email')}
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
@@ -56,7 +58,7 @@ export default function LoginScreen({ navigation }) {
 
           <TextInput
             style={styles.input}
-            placeholder="Password"
+            placeholder={t('password')}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -74,7 +76,7 @@ export default function LoginScreen({ navigation }) {
             {isLoading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Log In</Text>
+              <Text style={styles.buttonText}>{t('login')}</Text>
             )}
           </TouchableOpacity>
 
@@ -84,7 +86,7 @@ export default function LoginScreen({ navigation }) {
             disabled={isLoading}
           >
             <Text style={styles.secondaryButtonText}>
-              Don't have an account? Sign Up
+              {t('dontHaveAccount')}
             </Text>
           </TouchableOpacity>
         </View>

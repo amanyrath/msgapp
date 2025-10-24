@@ -375,6 +375,76 @@ export const createUserProfile = async (userId, profile, options = {}) => {
 };
 
 /**
+ * Get user's language preference from their profile
+ * @param {string} userId - User ID
+ * @returns {Promise<string>} - User's preferred language (e.g., 'Spanish', 'French', 'English')
+ */
+export const getUserLanguagePreference = async (userId) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      return userData.languagePreference || 'English'; // Default to English if not set
+    } else {
+      console.log('User profile not found, defaulting to English');
+      return 'English';
+    }
+  } catch (error) {
+    console.error('Error getting user language preference:', error);
+    return 'English'; // Fallback to English on error
+  }
+};
+
+/**
+ * Update user's language preference
+ * @param {string} userId - User ID
+ * @param {string} languagePreference - New language preference (e.g., 'Spanish', 'French', 'English')
+ * @returns {Promise<boolean>} - Success status
+ */
+export const updateUserLanguagePreference = async (userId, languagePreference) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    await setDoc(userRef, {
+      languagePreference,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    
+    console.log(`Updated language preference for user ${userId}: ${languagePreference}`);
+    return true;
+  } catch (error) {
+    console.error('Error updating user language preference:', error);
+    return false;
+  }
+};
+
+/**
+ * Get user profile with language preference
+ * @param {string} userId - User ID  
+ * @returns {Promise<object>} - User profile data including language preference
+ */
+export const getUserProfileWithLanguage = async (userId) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      return {
+        ...userData,
+        languagePreference: userData.languagePreference || 'English'
+      };
+    } else {
+      return null;
+    }
+  } catch (error) {
+    console.error('Error getting user profile with language:', error);
+    return null;
+  }
+};
+
+/**
  * Subscribe to all user profiles.
  * @param {Function} callback - Receives array of user profiles
  * @returns {Function} - Unsubscribe handler
