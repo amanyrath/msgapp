@@ -51,7 +51,6 @@ import { printSubscriptionAnalysis } from '../utils/subscriptionDebugger';
 import { shouldShowTranslationForChat } from '../utils/chatLanguageAnalysis';
 import { generateProactiveTranslations, estimateProactiveTranslationCost } from '../utils/proactiveTranslation';
 import { 
-  getTranslationState, 
   setTranslationState, 
   getTranslationStates,
   isTranslationExpanded 
@@ -212,7 +211,7 @@ export default function ChatScreen({ route, navigation }) {
     
     const loadTranslationStates = async () => {
       try {
-        const states = await getTranslationState(chatId);
+        const states = await getTranslationStates(chatId);
         setTranslationStates(states);
         console.log('🚀 Translation states loaded for chat:', chatId);
       } catch (error) {
