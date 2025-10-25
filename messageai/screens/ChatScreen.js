@@ -428,7 +428,9 @@ export default function ChatScreen({ route, navigation }) {
   
   // Filter out current user from typing users
   const othersTypingUsers = useMemo(() => {
-    return typingUsers.filter(userId => userId !== user?.uid);
+    const filtered = typingUsers.filter(userId => userId !== user?.uid);
+    console.log('👥 Others typing users:', filtered, 'from all:', typingUsers);
+    return filtered;
   }, [typingUsers, user?.uid]);
 
   // Initialize chat based on navigation params or fallback to personal chat
@@ -636,10 +638,10 @@ export default function ChatScreen({ route, navigation }) {
     };
   }, [chatMembers, user?.uid]);
 
-  // OPTIMIZED: Subscribe to typing indicators only for group chats (3+ members)
+  // Subscribe to typing indicators for all chats
   useEffect(() => {
-    if (!chatId || !chatMembers || chatMembers.length < 3) {
-      // Clear typing users if not a group chat
+    if (!chatId || !chatMembers || chatMembers.length < 2) {
+      // Need at least 2 members for typing indicators to make sense
       setTypingUsers([]);
       return;
     }
@@ -648,6 +650,7 @@ export default function ChatScreen({ route, navigation }) {
       `typing-${chatId}`,
       (callback) => subscribeToTypingUsers(chatId, callback),
       (typingUserIds) => {
+        console.log('📨 Received typing users update:', typingUserIds, 'for chat:', chatId);
         setTypingUsers(typingUserIds);
       },
       { 
@@ -800,14 +803,17 @@ export default function ChatScreen({ route, navigation }) {
     
     if (text.trim() && chatId && user) {
       // Set typing status
+      console.log('👀 Setting typing status for user:', user.uid, 'in chat:', chatId);
       setUserTyping(user.uid, chatId);
       
       // Clear typing after 3 seconds of inactivity
       typingTimeoutRef.current = setTimeout(() => {
+        console.log('⏰ Clearing typing status for user:', user.uid, 'in chat:', chatId);
         clearUserTyping(user.uid, chatId);
       }, 3000);
     } else if (chatId && user) {
       // Clear typing immediately if input is empty
+      console.log('🧹 Clearing typing status (empty input) for user:', user.uid, 'in chat:', chatId);
       clearUserTyping(user.uid, chatId);
     }
   };

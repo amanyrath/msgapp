@@ -210,12 +210,14 @@ export const setUserTyping = async (userId, chatId) => {
   
   try {
     const typingRef = ref(rtdb, `typing/${chatId}/${userId}`);
+    console.log('🔥 Setting typing status in RTDB:', `typing/${chatId}/${userId}`);
     await set(typingRef, {
       timestamp: serverTimestamp(),
       userId: userId,
     });
+    console.log('✅ Successfully set typing status for user:', userId);
   } catch (error) {
-    console.error('Error setting typing status:', error);
+    console.error('❌ Error setting typing status:', error);
   }
 };
 
@@ -232,9 +234,11 @@ export const clearUserTyping = async (userId, chatId) => {
   
   try {
     const typingRef = ref(rtdb, `typing/${chatId}/${userId}`);
+    console.log('🧹 Clearing typing status in RTDB:', `typing/${chatId}/${userId}`);
     await set(typingRef, null); // Remove the entry
+    console.log('✅ Successfully cleared typing status for user:', userId);
   } catch (error) {
-    console.error('Error clearing typing status:', error);
+    console.error('❌ Error clearing typing status:', error);
   }
 };
 
@@ -256,13 +260,17 @@ export const subscribeToTypingUsers = (chatId, callback) => {
   
   try {
     const typingRef = ref(rtdb, `typing/${chatId}`);
+    console.log('🔍 Subscribing to typing indicators at:', `typing/${chatId}`);
     
     const unsubscribe = onValue(typingRef, (snapshot) => {
       const data = snapshot.val();
       const now = Date.now();
       const TYPING_TIMEOUT = 3000; // 3 seconds
       
+      console.log('📥 Typing data received:', data, 'for chat:', chatId);
+      
       if (!data) {
+        console.log('📭 No typing data, calling callback with empty array');
         callback([]);
         return;
       }
@@ -273,12 +281,15 @@ export const subscribeToTypingUsers = (chatId, callback) => {
         if (!typingData || !typingData.timestamp) return false;
         
         const typingTime = new Date(typingData.timestamp).getTime();
-        return (now - typingTime) < TYPING_TIMEOUT;
+        const isActive = (now - typingTime) < TYPING_TIMEOUT;
+        console.log(`⏱️ User ${userId} typing data:`, typingData, 'isActive:', isActive);
+        return isActive;
       });
       
+      console.log('✨ Active typers:', activeTypers);
       callback(activeTypers);
     }, (error) => {
-      console.error('Error in typing listener:', error);
+      console.error('❌ Error in typing listener:', error);
     });
     
     return unsubscribe;
