@@ -44,9 +44,9 @@ export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
 export const storage = getStorage(app);
 
-import { Logger } from '../utils/logger';
+import logger from '../utils/logger';
 
-Logger.firebase('init', 'Firebase services initialized', {
+logger.firebase('init', 'Firebase services initialized', {
   auth: !!auth,
   authPersistence: 'AsyncStorage',
   firestore: !!db,
@@ -62,23 +62,23 @@ const USE_EMULATORS = false;
 if (USE_EMULATORS) {
   try {
     connectAuthEmulator(auth, 'http://127.0.0.1:9099');
-    Logger.firebase('emulator', 'Auth emulator connected');
+    logger.firebase('emulator', 'Auth emulator connected');
   } catch (e) {
-    Logger.firebase('emulator', 'Auth emulator already connected', { error: e.message });
+    logger.firebase('emulator', 'Auth emulator already connected', { error: e.message });
   }
 
   try {
     connectFirestoreEmulator(db, '127.0.0.1', 8080);
-    Logger.firebase('emulator', 'Firestore emulator connected');
+    logger.firebase('emulator', 'Firestore emulator connected');
   } catch (e) {
-    Logger.firebase('emulator', 'Firestore emulator already connected', { error: e.message });
+    logger.firebase('emulator', 'Firestore emulator already connected', { error: e.message });
   }
 
   try {
     connectDatabaseEmulator(rtdb, '127.0.0.1', 9000);
-    Logger.firebase('emulator', 'RTDB emulator connected', { rtdbInstance: !!rtdb });
+    logger.firebase('emulator', 'RTDB emulator connected', { rtdbInstance: !!rtdb });
   } catch (e) {
-    Logger.firebase('emulator', 'RTDB emulator already connected', { error: e.message });
+    logger.firebase('emulator', 'RTDB emulator already connected', { error: e.message });
   }
 
   try {
@@ -102,11 +102,11 @@ if (USE_EMULATORS) {
   if (getApps().length === 1) {
     enableIndexedDbPersistence(db).catch((err) => {
       if (err.code === 'failed-precondition') {
-        Logger.warn('Firebase', 'Offline persistence failed: Multiple tabs open');
+        logger.warn('Firebase', 'Offline persistence failed: Multiple tabs open');
       } else if (err.code === 'unimplemented') {
-        Logger.warn('Firebase', 'Offline persistence not supported in this browser');
+        logger.warn('Firebase', 'Offline persistence not supported in this browser');
       } else {
-        Logger.error('Firebase', 'Error enabling offline persistence', { error: err });
+        logger.error('Firebase', 'Error enabling offline persistence', { error: err });
       }
     });
   }

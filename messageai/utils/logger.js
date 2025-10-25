@@ -58,6 +58,12 @@ export const logger = {
     if (isDevelopment) {
       console.log('⚡ PERF:', ...args);
     }
+  },
+  
+  ui: (...args) => {
+    if (isDevelopment) {
+      console.log('🎨 UI:', ...args);
+    }
   }
 };
 

@@ -10,7 +10,7 @@ import { NotificationProvider } from './context/NotificationContext';
 import { LocalizationProvider } from './context/LocalizationContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { registerForPushNotifications } from './utils/notifications';
-import { Logger } from './utils/logger';
+import logger from './utils/logger';
 
 // Import screens
 import LoginScreen from './screens/LoginScreen';
@@ -33,13 +33,13 @@ function Navigation() {
 
   // Handle splash screen completion
   const handleSplashComplete = () => {
-    Logger.ui('Splash screen completed');
+    logger.ui('Splash screen completed');
     setShowSplash(false);
   };
 
   // Handle language initialization completion
   const handleLanguageInitComplete = () => {
-    Logger.ui('Language initialization completed');
+    logger.ui('Language initialization completed');
     setShowLanguageInit(false);
   };
 

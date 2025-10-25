@@ -56,6 +56,11 @@ describe('logger', () => {
       logger.firebase('test firebase');
       expect(mockConsole.log).toHaveBeenCalledWith('🔥 FB:', 'test firebase');
     });
+
+    it('should log UI messages in development', () => {
+      logger.ui('test ui');
+      expect(mockConsole.log).toHaveBeenCalledWith('🎨 UI:', 'test ui');
+    });
   });
 
   describe('in production mode', () => {

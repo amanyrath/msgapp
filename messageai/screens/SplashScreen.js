@@ -7,7 +7,7 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
-import { Logger } from '../utils/logger';
+import logger from '../utils/logger';
 import { useLocalization } from '../context/LocalizationContext';
 
 const { width, height } = Dimensions.get('window');
@@ -22,7 +22,7 @@ export default function SplashScreen({ onComplete }) {
   const [slideAnim] = useState(new Animated.Value(50));
 
   useEffect(() => {
-    Logger.ui('SplashScreen mounted');
+    logger.ui('SplashScreen mounted');
     
     // Animate in the splash content
     Animated.parallel([
@@ -41,7 +41,7 @@ export default function SplashScreen({ onComplete }) {
 
     // Auto-complete after 3 seconds
     const timer = setTimeout(() => {
-      Logger.ui('SplashScreen auto-completing after 3s');
+      logger.ui('SplashScreen auto-completing after 3s');
       onComplete();
     }, 3000);
 
