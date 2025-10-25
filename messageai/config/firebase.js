@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, initializeAuth, getReactNativePersistence } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getDatabase } from 'firebase/database';
 import { getStorage } from 'firebase/storage';
@@ -8,6 +8,7 @@ import { connectFirestoreEmulator } from 'firebase/firestore';
 import { connectDatabaseEmulator } from 'firebase/database';
 import { connectStorageEmulator } from 'firebase/storage';
 import { ref, set } from 'firebase/database';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Firebase configuration from Firebase Console
 const firebaseConfig = {
@@ -24,8 +25,21 @@ const firebaseConfig = {
 // Initialize Firebase (check if already initialized to avoid duplicate app error)
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firebase services
-export const auth = getAuth(app);
+// Initialize Firebase Auth with AsyncStorage persistence
+let auth;
+try {
+  // Try to initialize auth with AsyncStorage persistence
+  auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(AsyncStorage)
+  });
+  console.log('✅ Firebase Auth initialized with AsyncStorage persistence');
+} catch (error) {
+  // Auth already initialized, use existing instance
+  auth = getAuth(app);
+  console.log('✅ Using existing Firebase Auth instance');
+}
+
+export { auth };
 export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
 export const storage = getStorage(app);
@@ -34,6 +48,7 @@ import { Logger } from '../utils/logger';
 
 Logger.firebase('init', 'Firebase services initialized', {
   auth: !!auth,
+  authPersistence: 'AsyncStorage',
   firestore: !!db,
   rtdb: !!rtdb,
   storage: !!storage,

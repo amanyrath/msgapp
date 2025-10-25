@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,8 @@ import {
   ActionSheetIOS,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { useTranslation } from '../context/LocalizationContext';
+import { useTranslation, useLocalization } from '../context/LocalizationContext';
+import { getSystemLanguage, getLanguageName } from '../utils/localization';
 
 export default function SignupScreen({ navigation }) {
   const [email, setEmail] = useState('');
@@ -44,7 +45,29 @@ export default function SignupScreen({ navigation }) {
     'Finnish'
   ];
 
-  // Language defaults to English - no need for useEffect since it's already set in useState
+  // Detect system language for signup
+  useEffect(() => {
+    const detectSystemLanguage = async () => {
+      try {
+        const systemLanguage = getSystemLanguage();
+        const languageName = getLanguageName(systemLanguage);
+        
+        // Only use system language if it's in our supported list
+        if (availableLanguages.includes(languageName)) {
+          console.log('🌍 Signup: Using detected system language:', languageName);
+          setLanguage(languageName);
+        } else {
+          console.log('🇺🇸 Signup: System language not supported, defaulting to English');
+          setLanguage('English');
+        }
+      } catch (error) {
+        console.log('🇺🇸 Signup: Could not detect system language, defaulting to English');
+        setLanguage('English');
+      }
+    };
+
+    detectSystemLanguage();
+  }, []);
 
   const getRandomEmoji = () => {
     const emojis = [

@@ -10,6 +10,7 @@ import {
 import { translateText } from '../utils/aiService';
 import { useLocalization } from '../context/LocalizationContext';
 import { getPreGeneratedTranslation } from '../utils/proactiveTranslation';
+import { getTranslationWithCache } from '../utils/simpleTranslationCache';
 
 /**
  * InlineTranslation - Shows "See translation" link below messages
@@ -30,6 +31,8 @@ export default function InlineTranslation({
   preGeneratedTranslations = {},
   translationState = null,
   onToggle,
+  translateAllEnabled = false,
+  autoExpand = false,
   style = {}
 }) {
   const { t } = useLocalization();
@@ -39,7 +42,7 @@ export default function InlineTranslation({
   const [fadeAnim] = useState(new Animated.Value(0));
   
   // Three-step disclosure states: hidden -> translation -> full context
-  const [currentStep, setCurrentStep] = useState(0); // 0 = button only, 1 = translation, 2 = full context
+  const [currentStep, setCurrentStep] = useState(autoExpand ? 1 : 0); // Auto-expand to translation if enabled
 
   // Animate in when component mounts
   useEffect(() => {
@@ -49,6 +52,16 @@ export default function InlineTranslation({
       useNativeDriver: true,
     }).start();
   }, []);
+
+  // Auto-expand when translate all mode is enabled
+  useEffect(() => {
+    if (autoExpand && currentStep === 0) {
+      setCurrentStep(1); // Auto-show translation
+    } else if (!autoExpand && translateAllEnabled === false && currentStep > 0) {
+      // Reset when translate all is disabled (but not when just autoExpand is false)
+      setCurrentStep(0);
+    }
+  }, [autoExpand, translateAllEnabled]);
 
   // Load translation when needed (step 1 or 2)
   useEffect(() => {
@@ -73,22 +86,34 @@ export default function InlineTranslation({
     setError(null);
 
     try {
-      // First, check for pre-generated translation
       let result = null;
       
-      // Check in passed preGeneratedTranslations prop first
-      if (preGeneratedTranslations[messageId]) {
+      // 1. Check enhanced memory cache first
+      try {
+        result = await getTranslationWithCache(messageId, messageText, userLanguage, chatLanguage);
+        if (result && result.success) {
+          const cacheStatus = result.fromCache ? 'MEMORY CACHE' : 'LIVE API (cached)';
+          console.log(`🚀 Translation loaded via ${cacheStatus} for message:`, messageId);
+        }
+      } catch (error) {
+        console.warn('Enhanced cache failed, using fallback methods:', error);
+      }
+      
+      // Fallback 1: Check client-side pre-generated translations
+      if (!result && preGeneratedTranslations[messageId]) {
         result = preGeneratedTranslations[messageId];
         console.log('🚀 Using pre-generated translation from props for message:', messageId);
-      } else if (chatId) {
-        // Check proactive translation cache
-        result = getPreGeneratedTranslation(chatId, messageId, userLanguage);
+      }
+      
+      // Fallback 2: Check proactive translation cache  
+      if (!result && chatId) {
+        result = getPreGeneratedTranslation(chatId, messageId, userLanguage, translateAllEnabled);
         if (result) {
           console.log('🚀 Using pre-generated translation from cache for message:', messageId);
         }
       }
       
-      // If no pre-generated translation, generate one now
+      // Fallback 3: Generate new translation via API
       if (!result) {
         console.log('🌐 Generating new inline translation for message:', messageId);
         
@@ -109,7 +134,8 @@ export default function InlineTranslation({
 
       if (result && result.success) {
         setTranslationData(result);
-        console.log('✅ Inline translation loaded successfully');
+        const source = result.fromCache ? 'cached' : 'live API';
+        console.log(`✅ Inline translation loaded successfully (${source})`);
       } else {
         setError(result?.error || 'Translation failed');
         console.error('❌ Inline translation failed:', result?.error);

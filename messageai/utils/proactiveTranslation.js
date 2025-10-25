@@ -7,21 +7,26 @@ import { getCachedUserLanguagePreference } from './languageIntegration';
 // Each user's translations are private and don't affect what others see
 const proactiveTranslationCache = new Map();
 const CACHE_EXPIRY_TIME = 30 * 60 * 1000; // 30 minutes
+const TRANSLATE_ALL_CACHE_EXPIRY_TIME = 4 * 60 * 60 * 1000; // 4 hours for translate all mode
 
 /**
  * Proactively generate translations for messages when user enters chat
- * Analyzes last 15 messages and pre-generates translations for foreign language content
+ * Analyzes last N messages and pre-generates translations for foreign language content
  * @param {string} chatId - Chat ID
- * @param {Array} messages - Chat messages (should be last 15)
+ * @param {Array} messages - Chat messages (default last 15, or 20 for translate all mode)
  * @param {string} userId - Current user ID
  * @param {object} options - Options for translation generation
+ * @param {number} options.maxMessages - Maximum messages to process (15 default, 20 for translate all)
+ * @param {boolean} options.forceRefresh - Force refresh of cached translations
+ * @param {boolean} options.autoExpand - Auto-expand mode for translate all (uses longer cache)
  * @returns {Promise<object>} - Pre-generated translations result
  */
 export async function generateProactiveTranslations(chatId, messages, userId, options = {}) {
   try {
     const {
       maxMessages = 15,
-      forceRefresh = false
+      forceRefresh = false,
+      autoExpand = false // New option for translate all mode
     } = options;
 
     console.log('🔄 Starting proactive translation generation for chat:', chatId);
@@ -84,9 +89,11 @@ export async function generateProactiveTranslations(chatId, messages, userId, op
     
     if (cached && !forceRefresh) {
       const cacheAge = Date.now() - cached.timestamp;
-      if (cacheAge < CACHE_EXPIRY_TIME) {
+      // Use longer cache expiry for translate all mode
+      const expiryTime = autoExpand ? TRANSLATE_ALL_CACHE_EXPIRY_TIME : CACHE_EXPIRY_TIME;
+      if (cacheAge < expiryTime) {
         preGeneratedTranslations = cached.translations;
-        console.log('🚀 Using cached proactive translations:', Object.keys(preGeneratedTranslations).length);
+        console.log(`🚀 Using cached proactive translations (${autoExpand ? 'translate all' : 'normal'} mode):`, Object.keys(preGeneratedTranslations).length);
       }
     }
 
@@ -223,17 +230,19 @@ export async function generateProactiveTranslations(chatId, messages, userId, op
  * @param {string} chatId - Chat ID
  * @param {string} messageId - Message ID
  * @param {string} userLanguage - User's preferred language
+ * @param {boolean} isTranslateAllMode - Whether in translate all mode (uses longer cache)
  * @returns {object|null} - Pre-generated translation or null
  */
-export function getPreGeneratedTranslation(chatId, messageId, userLanguage) {
+export function getPreGeneratedTranslation(chatId, messageId, userLanguage, isTranslateAllMode = false) {
   const cacheKey = generateCacheKey(chatId, userLanguage);
   const cached = proactiveTranslationCache.get(cacheKey);
 
   if (!cached) return null;
 
-  // Check if cache is still valid
+  // Check if cache is still valid - use longer expiry for translate all mode
   const cacheAge = Date.now() - cached.timestamp;
-  if (cacheAge > CACHE_EXPIRY_TIME) {
+  const expiryTime = isTranslateAllMode ? TRANSLATE_ALL_CACHE_EXPIRY_TIME : CACHE_EXPIRY_TIME;
+  if (cacheAge > expiryTime) {
     proactiveTranslationCache.delete(cacheKey);
     return null;
   }

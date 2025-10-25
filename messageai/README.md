@@ -209,5 +209,260 @@ eas build --platform ios --profile preview
 
 ---
 
+## 📋 Complete Setup Guide
+
+### Prerequisites
+- **Node.js** v18+ (LTS recommended)
+- **npm** or **yarn** package manager
+- **OpenAI Account** with API access ([Sign up](https://platform.openai.com))
+- **Firebase Project** (or use existing one)
+- **iOS Simulator** (macOS) or **Android Emulator** for testing
+- **Expo Go** app on physical device (optional)
+
+### Step-by-Step Setup
+
+#### 1. Clone and Install
+```bash
+git clone <repository-url>
+cd msgapp/messageai
+npm install
+```
+
+#### 2. Environment Configuration
+```bash
+# Copy environment template
+cp ../envexample.txt .env
+
+# Edit .env with your values
+OPENAI_API_KEY=sk-your-openai-api-key-here
+USE_EMULATORS=false
+DEBUG_MODE=false
+```
+
+#### 3. Firebase Setup (Optional - Pre-configured)
+The app uses a pre-configured Firebase project, but you can set up your own:
+
+1. **Create Firebase Project** at https://console.firebase.google.com
+2. **Enable Services**:
+   - Authentication (Email/Password)
+   - Firestore Database
+   - Realtime Database (for presence)
+3. **Download Config** and replace in `config/firebase.js`
+4. **Deploy Rules**: `firebase deploy --only database,firestore`
+
+#### 4. Development Setup
+```bash
+# Start development server
+npm start
+
+# Or with specific platform
+npm run ios      # iOS simulator
+npm run android  # Android emulator
+npm run web      # Web browser (limited features)
+```
+
+#### 5. Testing Setup
+```bash
+# Run test suite
+npm test
+
+# Run with coverage
+npm run test:coverage
+
+# Watch mode for development
+npm run test:watch
+```
+
+### Build Configuration
+
+#### EAS Build Profiles
+The app includes comprehensive build profiles for all environments:
+
+```bash
+# Development build (with debugger)
+eas build --profile development
+
+# Preview build (internal testing)
+eas build --profile preview --platform android
+
+# Simulator build (iOS simulator only)
+eas build --profile preview-simulator --platform ios
+
+# Production build (app stores)
+eas build --profile production --platform all
+
+# Staging build (pre-production testing)
+eas build --profile staging
+```
+
+#### Build Environment Variables
+Each profile includes appropriate environment settings:
+- **Development**: `USE_EMULATORS=true`, Debug logging
+- **Preview/Staging**: `USE_EMULATORS=false`, Info logging  
+- **Production**: `USE_EMULATORS=false`, Warn logging only
+
+## 🌳 Branch Strategy & Development Workflow
+
+### Branch Structure
+```
+main (production)
+├── dev (development)
+│   ├── feature/ai-improvements
+│   ├── feature/new-language-support
+│   ├── bugfix/translation-cache
+│   └── hotfix/critical-bug
+└── release/v1.1.0
+```
+
+### Workflow
+1. **Feature Development**: Create `feature/description` from `dev`
+2. **Pull Request**: Target `dev` branch for review
+3. **CI/CD Pipeline**: Automated testing, linting, build validation
+4. **Code Review**: Required approval before merge
+5. **Release Preparation**: Create `release/vX.Y.Z` from `dev`
+6. **Production Deploy**: Merge `release/vX.Y.Z` to `main`
+
+### Commit Convention
+```bash
+feat: add new AI translation feature
+fix: resolve language persistence bug  
+docs: update API documentation
+test: add unit tests for AI service
+style: fix code formatting
+refactor: optimize translation caching
+```
+
+### CI/CD Pipeline (GitHub Actions)
+
+The repository includes comprehensive CI/CD automation:
+
+#### Automated Checks (Every PR/Push)
+- **Linting**: ESLint + Prettier formatting validation
+- **Testing**: Jest unit tests with coverage reporting
+- **Type Checking**: TypeScript validation (when applicable)
+- **Security**: npm audit + sensitive file detection
+- **Build Validation**: Expo prebuild for iOS/Android
+- **Firebase Rules**: Firestore/RTDB rules validation
+
+#### Build Automation
+- **Preview Builds**: Automatic APK generation on PR
+- **Performance Analysis**: Bundle size and dependency checking
+- **Code Quality**: Coverage reporting and quality gates
+
+#### Environment-Specific Testing
+```bash
+# Local development with emulators
+USE_EMULATORS=true npm test
+
+# Production-like testing  
+USE_EMULATORS=false npm run test:integration
+```
+
+## 🐛 Known Gaps & Limitations
+
+### Current Limitations
+
+#### AI Features
+- **Rate Limits**: OpenAI API has usage limits (10K requests/day free tier)
+- **Context Window**: Limited to last 50 messages for performance
+- **Language Detection**: Accuracy depends on message length
+- **Cultural Context**: May miss very local/recent cultural references
+- **Response Time**: 1-3 seconds depending on complexity and API load
+
+#### Push Notifications
+- **Foreground Only**: Background notifications require Cloud Functions
+- **iOS Production**: Requires Apple Developer Account ($99/year)
+- **Testing Limited**: Full E2E testing needs physical devices
+
+#### Platform Support
+- **iOS First**: Primary development/testing on iOS
+- **Android**: Fully supported but less tested
+- **Web**: Limited functionality (no push notifications)
+
+#### Technical Debt
+- **No TypeScript**: Plain JavaScript for rapid development
+- **Manual Testing**: Limited automated E2E testing
+- **Basic Error Handling**: Could be more comprehensive
+- **No Message Editing**: Can't edit sent messages
+- **No File Uploads**: Text messages only currently
+
+### Performance Considerations
+
+#### Known Performance Issues
+- **Large Chat History**: May slow down with 1000+ messages
+- **Memory Usage**: AI context caching uses device memory
+- **Network Dependency**: Requires internet for AI features
+- **Battery Impact**: Real-time presence uses battery
+
+#### Optimization Opportunities
+- **Image Optimization**: Assets could be further compressed
+- **Bundle Size**: Could implement code splitting
+- **Caching Strategy**: More aggressive caching possible
+- **Database Queries**: Could optimize with better indexing
+
+### Security Considerations
+
+#### Current Security Model
+- **API Keys**: Stored in build-time environment variables
+- **Firebase Rules**: Restrict access to chat members only
+- **No E2E Encryption**: Messages stored in plain text in Firestore
+- **Client-Side AI**: API calls from client (not server)
+
+#### Security Enhancements Needed
+- **Message Encryption**: End-to-end encryption for sensitive chats
+- **API Proxy**: Server-side OpenAI calls for better security
+- **Rate Limiting**: User-level rate limiting for AI features
+- **Audit Logging**: Comprehensive security event logging
+
+## 🔮 Future Roadmap
+
+### Short-term (Next Release)
+- [ ] **Background Push Notifications** with Cloud Functions
+- [ ] **Message Editing/Deletion** functionality
+- [ ] **File/Image Sharing** with AI image analysis
+- [ ] **Voice Messages** with AI transcription
+- [ ] **Improved Error Handling** with user-friendly messages
+
+### Medium-term (3-6 months)  
+- [ ] **TypeScript Migration** for better type safety
+- [ ] **E2E Encryption** for message privacy
+- [ ] **Advanced AI Features** (voice translation, image analysis)
+- [ ] **Performance Optimization** for large chat histories
+- [ ] **Web App** with full feature parity
+
+### Long-term (6+ months)
+- [ ] **Multi-Language UI** with full internationalization
+- [ ] **Enterprise Features** (team management, admin controls)
+- [ ] **Advanced Analytics** and user behavior insights
+- [ ] **AI Model Fine-tuning** for better cultural accuracy
+- [ ] **Desktop Apps** (Electron-based)
+
+## 📞 Support & Contributing
+
+### Getting Help
+- **Documentation**: Check this README and `/process-docs/` folder
+- **Issues**: Create GitHub issues with detailed reproduction steps
+- **Firebase Console**: Monitor logs at https://console.firebase.google.com
+- **AI Debugging**: Use built-in debug tools in `utils/debugLanguage.js`
+
+### Contributing
+1. **Fork** the repository
+2. **Create** feature branch from `dev`
+3. **Follow** coding standards (ESLint + Prettier)
+4. **Add** tests for new functionality
+5. **Update** documentation as needed
+6. **Submit** pull request with clear description
+
+### Code Standards
+- **JavaScript**: ES6+ features, functional programming preferred
+- **React**: Hooks-based components, avoid class components
+- **Styling**: React Native StyleSheet, consistent naming
+- **Testing**: Jest + React Native Testing Library
+- **Documentation**: JSDoc comments for complex functions
+
+---
+
 **Ready for international users who need AI-powered communication!** 🚀
+
+For detailed setup instructions, see [FIREBASE_DEPLOYMENT.md](../FIREBASE_DEPLOYMENT.md) and [PUSH_NOTIFICATIONS_SETUP.md](../PUSH_NOTIFICATIONS_SETUP.md).
 

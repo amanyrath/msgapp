@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,8 @@ import { db } from '../config/firebase';
 import { createUserProfile } from '../utils/firestore';
 import { setUserOnline } from '../utils/presence';
 import subscriptionManager from '../utils/subscriptionManager';
+import LanguageInitializationScreen from './LanguageInitializationScreen';
+import { translateUIText } from '../utils/localization';
 
 export default function ProfileScreen({ navigation }) {
   const { user, signOut } = useAuth();
@@ -30,6 +32,7 @@ export default function ProfileScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingLanguage, setSavingLanguage] = useState(false);
+  const [showLanguageLoading, setShowLanguageLoading] = useState(false);
 
   // Available languages
   const availableLanguages = [
@@ -52,16 +55,17 @@ export default function ProfileScreen({ navigation }) {
 
   useEffect(() => {
     loadProfile();
-  }, [user?.uid]);
+  }, [loadProfile]); // Use memoized loadProfile function
 
-  // Sync local language preference with context
+  // Sync local language preference with context - improved synchronization
   useEffect(() => {
-    if (userLanguagePreference) {
+    if (userLanguagePreference && userLanguagePreference !== languagePreference) {
+      console.log('🔄 Syncing ProfileScreen language with context:', userLanguagePreference);
       setLanguagePreference(userLanguagePreference);
     }
-  }, [userLanguagePreference]);
+  }, [userLanguagePreference, languagePreference]);
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     if (!user?.uid) return;
 
     try {
@@ -93,12 +97,19 @@ export default function ProfileScreen({ navigation }) {
       if (userData) {
         setNickname(userData.nickname || userData.displayName || user.email?.split('@')[0] || '');
         setIcon(userData.icon || '👤');
-        setLanguagePreference(userData.languagePreference || 'English');
+        
+        // Priority: Use context language preference if available, otherwise use stored data
+        const contextLanguage = userLanguagePreference;
+        const storedLanguage = userData.languagePreference || 'English';
+        const preferredLanguage = contextLanguage || storedLanguage;
+        
+        console.log('📱 Language preference loading - Context:', contextLanguage, 'Stored:', storedLanguage, 'Using:', preferredLanguage);
+        setLanguagePreference(preferredLanguage);
       } else {
         // Set defaults for users without profiles
         setNickname(user.email?.split('@')[0] || '');
         setIcon('👤');
-        setLanguagePreference('English');
+        setLanguagePreference(userLanguagePreference || 'English');
       }
     } catch (error) {
       console.error('Error loading profile:', error);
@@ -106,7 +117,7 @@ export default function ProfileScreen({ navigation }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.uid, user?.email, userLanguagePreference, t]);
 
   const getRandomEmoji = () => {
     const emojis = [
@@ -266,6 +277,7 @@ export default function ProfileScreen({ navigation }) {
     
     try {
       setSavingLanguage(true);
+      setShowLanguageLoading(true); // Show loading screen
       console.log('Updating language preference:', newLanguage);
       
       // Update via localization context
@@ -273,23 +285,47 @@ export default function ProfileScreen({ navigation }) {
       
       if (success) {
         setLanguagePreference(newLanguage);
-        // Give a brief moment for the UI to update with new translations
-        setTimeout(() => {
-          Alert.alert(
-            t('languageUpdated') || 'Language Updated',
-            `${t('languageChangedTo') || 'Language changed to'} ${newLanguage}. ${t('restartForFullEffect') || 'The interface has been updated immediately.'}`
-          );
-        }, 300);
+        
+        // Wait longer for translations to fully load
+        setTimeout(async () => {
+          setShowLanguageLoading(false); // Hide loading screen
+          
+          // Wait additional time and manually translate alert text in the new language
+          setTimeout(async () => {
+            try {
+              // Manually translate the alert text in the new language
+              const titleText = newLanguage === 'English' ? 
+                'Language Updated' : 
+                await translateUIText('Language Updated', newLanguage, { userId: user.uid });
+              
+              const messageText = newLanguage === 'English' ?
+                `Language changed to ${newLanguage}. The interface has been updated immediately.` :
+                await translateUIText(`Language changed to ${newLanguage}. The interface has been updated immediately.`, newLanguage, { userId: user.uid });
+              
+              console.log(`🎉 Showing language change alert in ${newLanguage}:`, titleText);
+              Alert.alert(titleText, messageText);
+            } catch (error) {
+              console.error('Error translating alert text:', error);
+              // Fallback to English
+              Alert.alert(
+                'Language Updated', 
+                `Language changed to ${newLanguage}. The interface has been updated immediately.`
+              );
+            }
+          }, 1000); // 1 second delay for stability
+        }, 3000); // 3 seconds for full language loading
       } else {
+        setShowLanguageLoading(false);
         Alert.alert(
-          t('error'),
+          t('error') || 'Error',
           t('failedToUpdateLanguage') || 'Failed to update language preference. Please try again.'
         );
       }
     } catch (error) {
       console.error('Error updating language:', error);
+      setShowLanguageLoading(false);
       Alert.alert(
-        t('error'),
+        t('error') || 'Error',
         t('failedToUpdateLanguage') || 'Failed to update language preference. Please try again.'
       );
     } finally {
@@ -381,6 +417,15 @@ export default function ProfileScreen({ navigation }) {
     );
   }
 
+  // Show language loading screen when changing languages
+  if (showLanguageLoading) {
+    return (
+      <LanguageInitializationScreen 
+        onComplete={() => setShowLanguageLoading(false)}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -395,7 +440,12 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.headerSpacer} />
         </View>
 
-        <View style={styles.content}>
+        <ScrollView 
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.avatarContainer}>
             <View style={styles.avatarCircle}>
               <Text style={styles.avatarIcon}>{icon}</Text>
@@ -492,7 +542,7 @@ export default function ProfileScreen({ navigation }) {
           >
             <Text style={styles.signOutButtonText}>{t('signOut') || 'Sign Out'}</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -502,9 +552,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+    paddingTop: Platform.OS === 'android' ? 25 : 0, // Android status bar buffer
   },
   keyboardView: {
     flex: 1,
+    paddingBottom: Platform.OS === 'android' ? 15 : 0, // Android navigation bar buffer
   },
   loadingContainer: {
     flex: 1,
@@ -516,7 +568,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: Platform.OS === 'android' ? 20 : 16, // Extra padding for Android
+    paddingTop: Platform.OS === 'android' ? 10 : 16, // Android header buffer
     borderBottomWidth: 1,
     borderBottomColor: '#F1F1F1',
   },
@@ -539,7 +592,11 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  scrollContent: {
     padding: 20,
+    paddingTop: Platform.OS === 'android' ? 30 : 20, // Extra top buffer for Android
+    paddingBottom: Platform.OS === 'android' ? 60 : 40, // Extra bottom buffer for Android navigation
   },
   avatarContainer: {
     alignItems: 'center',

@@ -456,12 +456,26 @@ The MessageAI app has achieved its full vision as an AI-powered International Co
 
 ## Known Issues
 
-### Language Persistence Issue ❌
-**Severity**: Medium - User Experience Impact  
-**Description**: User language preferences don't persist across logout/login cycles  
-**Impact**: Users must reconfigure their language choice after each login  
-**Status**: Identified, fix in progress  
-**Expected Resolution**: 2-3 hours of development work
+### Language Persistence Issue ✅ COMPLETELY FIXED
+**Severity**: ~~Medium~~ RESOLVED  
+**Description**: ~~User language preferences don't persist across logout/login cycles~~ **COMPLETELY FIXED**  
+**Impact**: ~~Users must reconfigure their language choice after each login~~ **RESOLVED**  
+**Status**: **COMPLETED** - Language preferences now properly load and persist with forced initialization  
+**Resolution Date**: October 24, 2025
+
+**Final Enhancement**: Added forced language initialization screen that:
+- ✅ Shows on every login regardless of cache state
+- ✅ Forces fresh language preference loading from Firestore
+- ✅ Bypasses cache to prevent stale data issues  
+- ✅ Extended timeout (10 seconds) and stability delay (3 seconds)
+- ✅ Provides real-time status updates to user
+- ✅ Ensures language is fully loaded before showing main app
+
+**Localized Splash Screens**: All splash screens now display in user's preferred language:
+- ✅ SplashScreen automatically detects and uses cached user language preference
+- ✅ LanguageInitializationScreen shows loading text in user's selected language
+- ✅ Both screens fall back to English if translation fails
+- ✅ Real-time translation of all UI text including features, taglines, and status messages
 
 ### Previously Resolved Issues
 **All core features working as expected** - No other known issues.

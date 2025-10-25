@@ -1,78 +1,126 @@
 /**
- * Logger utility tests
+ * Tests for logger utility
  */
 
-import { Logger, PerfLogger, devLog } from '../../utils/logger';
+import logger from '../../utils/logger';
 
-// Mock Constants to control environment detection
-jest.mock('expo-constants', () => ({
-  appOwnership: null, // Simulate Expo Go
-}));
+// Mock console methods
+const mockConsole = {
+  log: jest.fn(),
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+};
 
-describe('Logger', () => {
+describe('logger', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    global.console.log = jest.fn();
+    // Clear mock calls
+    Object.values(mockConsole).forEach(mock => mock.mockClear());
+    
+    // Mock console methods
+    global.console = mockConsole;
   });
 
-  describe('debug logging', () => {
+  describe('in development mode', () => {
+    beforeEach(() => {
+      // Mock __DEV__ to be true
+      global.__DEV__ = true;
+    });
+
     it('should log debug messages in development', () => {
-      Logger.debug('TEST', 'debug message');
-      expect(console.log).toHaveBeenCalled();
+      logger.debug('test message');
+      expect(mockConsole.log).toHaveBeenCalledWith('🐛 DEBUG:', 'test message');
     });
 
-    it('should include timestamp and tag', () => {
-      Logger.debug('AUTH', 'user login', { userId: '123' });
-      expect(console.log).toHaveBeenCalledWith(
-        expect.stringMatching(/\[\d{2}:\d{2}:\d{2}\.\d{3}\] DEBUG AUTH:/),
-        'user login',
-        { userId: '123' }
-      );
+    it('should log info messages in development', () => {
+      logger.info('test info');
+      expect(mockConsole.info).toHaveBeenCalledWith('test info');
+    });
+
+    it('should log warnings in development', () => {
+      logger.warn('test warning');
+      expect(mockConsole.warn).toHaveBeenCalledWith('test warning');
+    });
+
+    it('should log language messages in development', () => {
+      logger.language('test language');
+      expect(mockConsole.log).toHaveBeenCalledWith('🌍 LANG:', 'test language');
+    });
+
+    it('should log AI messages in development', () => {
+      logger.ai('test AI');
+      expect(mockConsole.log).toHaveBeenCalledWith('🤖 AI:', 'test AI');
+    });
+
+    it('should log Firebase messages in development', () => {
+      logger.firebase('test firebase');
+      expect(mockConsole.log).toHaveBeenCalledWith('🔥 FB:', 'test firebase');
     });
   });
 
-  describe('specialized loggers', () => {
-    it('should use firebase logger', () => {
-      Logger.firebase('auth', 'user signed in', { uid: '123' });
-      expect(console.log).toHaveBeenCalled();
+  describe('in production mode', () => {
+    beforeEach(() => {
+      // Mock __DEV__ to be false
+      global.__DEV__ = false;
+      process.env.NODE_ENV = 'production';
     });
 
-    it('should use network logger', () => {
-      Logger.network('connection established');
-      expect(console.log).toHaveBeenCalled();
+    it('should not log debug messages in production', () => {
+      logger.debug('test message');
+      expect(mockConsole.log).not.toHaveBeenCalled();
     });
 
-    it('should use photo logger', () => {
-      Logger.photo('photo uploaded', { size: 1024 });
-      expect(console.log).toHaveBeenCalled();
+    it('should not log info messages in production', () => {
+      logger.info('test info');
+      expect(mockConsole.info).not.toHaveBeenCalled();
+    });
+
+    it('should not log warnings in production', () => {
+      logger.warn('test warning');
+      expect(mockConsole.warn).not.toHaveBeenCalled();
+    });
+
+    it('should not log language messages in production', () => {
+      logger.language('test language');
+      expect(mockConsole.log).not.toHaveBeenCalled();
     });
   });
 
   describe('error logging', () => {
-    it('should always log errors', () => {
-      Logger.error('CRITICAL', 'something went wrong');
-      expect(console.log).toHaveBeenCalled();
+    it('should always log errors even in production', () => {
+      global.__DEV__ = false;
+      process.env.NODE_ENV = 'production';
+      
+      logger.error('test error');
+      expect(mockConsole.error).toHaveBeenCalledWith('test error');
     });
   });
-});
 
-describe('PerfLogger', () => {
   it('should measure performance in development', () => {
-    const perf = PerfLogger.start('test-operation');
-    expect(perf).toHaveProperty('end');
-    expect(typeof perf.end).toBe('function');
+    global.__DEV__ = true;
+    
+    logger.performance('test performance');
+    expect(mockConsole.log).toHaveBeenCalledWith('⚡ PERF:', 'test performance');
   });
 
-  it('should log performance when ended', () => {
-    const perf = PerfLogger.start('test-operation');
-    perf.end({ data: 'test' });
-    // Performance logging is tested by ensuring no errors are thrown
-  });
-});
+  describe('backward compatibility', () => {
+    it('should export debugLog for backward compatibility', () => {
+      const { debugLog } = require('../../utils/logger');
+      expect(typeof debugLog).toBe('function');
+    });
 
-describe('devLog compatibility', () => {
-  it('should log in development mode', () => {
-    devLog('test message');
-    expect(console.log).toHaveBeenCalledWith('test message');
+    it('should export errorLog for backward compatibility', () => {
+      const { errorLog } = require('../../utils/logger');
+      expect(typeof errorLog).toBe('function');
+    });
+  });
+
+  describe('with multiple arguments', () => {
+    it('should log in development mode', () => {
+      global.__DEV__ = true;
+      
+      logger.log('message', { data: 'test' }, 123);
+      expect(mockConsole.log).toHaveBeenCalledWith('message', { data: 'test' }, 123);
+    });
   });
 });

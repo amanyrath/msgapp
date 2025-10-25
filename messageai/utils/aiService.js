@@ -624,105 +624,6 @@ function filterMessagesByTimeframe(messages, timeframeDescription) {
   });
 }
 
-/**
- * Detect if user is requesting to send a message via AI
- * @param {string} userMessage - The user's input message
- * @param {string} userLanguage - User's current interface language
- * @returns {Promise<object>} Detection result with parsed message content
- */
-export async function detectSendMessageRequest(userMessage, userLanguage = 'English') {
-  try {
-    const lowerMessage = userMessage.toLowerCase().trim();
-    
-    // Multi-language detection patterns for "send message"
-    const sendPatterns = [
-      // English variations
-      /\b(send\s+(a\s+)?message|send\s+this|send\s+text|message\s+them|send\s+it)\b/i,
-      // Spanish variations  
-      /\b(enviar?\s+(un\s+)?mensaje|enviar?\s+esto|mandar?\s+(un\s+)?mensaje|mensaje|envía\s+esto)\b/i,
-      // French variations
-      /\b(envoyer?\s+(un\s+)?message|envoie\s+(un\s+)?message|envoyer?\s+ça|message)\b/i,
-      // German variations
-      /\b(nachricht\s+senden|sende\s+(eine\s+)?nachricht|nachricht\s+schicken|senden)\b/i,
-      // Portuguese variations
-      /\b(enviar?\s+(uma\s+)?mensagem|mandar?\s+(uma\s+)?mensagem|mensagem)\b/i,
-      // Italian variations
-      /\b(inviare?\s+(un\s+)?messaggio|mandare?\s+(un\s+)?messaggio|messaggio)\b/i
-    ];
-
-    const matchesSendPattern = sendPatterns.some(pattern => pattern.test(lowerMessage));
-    
-    if (!matchesSendPattern) {
-      return { isSendRequest: false };
-    }
-
-    // Use AI to extract the actual message content and confirm intent
-    const client = getOpenAIClient();
-    const systemPrompt = `You are a message intent detector. Analyze if the user wants to send a message via AI assistant.
-
-Your task:
-1. Determine if this is a "send message" request
-2. Extract the actual message content they want to send (if any)
-3. Respond with proper confirmation text in the user's language
-
-IMPORTANT: Respond in the SAME LANGUAGE as the user's input. If they write in Spanish, respond in Spanish. Match their language exactly.
-
-Response format (JSON):
-{
-  "isSendRequest": true/false,
-  "messageContent": "extracted message content or null",
-  "confidence": 0.0-1.0,
-  "confirmationText": "localized confirmation text asking for approval",
-  "userLanguage": "detected language"
-}`;
-
-    const userPrompt = `User input: "${userMessage}"
-
-Analyze this message and determine:
-1. Is this a request to send a message?
-2. What message do they want to send (extract the content)?
-3. Provide confirmation text in the user's language asking "Send this message? Yes/No"
-
-Examples:
-- "send message hello world" → extract "hello world"
-- "enviar mensaje hola" → extract "hola" 
-- "send this: I'll be there soon" → extract "I'll be there soon"
-- "can you message them that I'm running late?" → extract "I'm running late"`;
-
-    const response = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature: 0.3, // Low temperature for consistent detection
-      max_tokens: 300,
-      response_format: { type: 'json_object' }
-    });
-
-    const result = JSON.parse(response.choices[0].message.content);
-    
-    if (result.isSendRequest && result.confidence > 0.7) {
-      return {
-        isSendRequest: true,
-        messageContent: result.messageContent,
-        confirmationText: result.confirmationText,
-        userLanguage: result.userLanguage,
-        confidence: result.confidence,
-        // Special flag to indicate this needs approval
-        needsApproval: true,
-        actionType: 'send_message',
-        success: true,
-        message: result.confirmationText
-      };
-    }
-
-    return { isSendRequest: false };
-  } catch (error) {
-    console.error('Error detecting send message request:', error);
-    return { isSendRequest: false };
-  }
-}
 
 /**
  * Process AI chat message - handles general AI assistant interactions
@@ -734,11 +635,6 @@ Examples:
  */
 export async function processChatMessage({ userMessage, chatContext, userPreferences, userLanguage = 'English' }) {
   try {
-    // First, check if this is a message sending request
-    const sendMessageRequest = await detectSendMessageRequest(userMessage, userLanguage);
-    if (sendMessageRequest.isSendRequest) {
-      return sendMessageRequest;
-    }
 
     const systemPrompt = getUniversalSystemPrompt('chat_assistant');
 
@@ -792,6 +688,5 @@ export default {
   generateSmartReplies,
   analyzeConversationCulture,
   processChatMessage,
-  detectSendMessageRequest,
   summarizeConversation
 };

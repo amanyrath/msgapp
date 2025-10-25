@@ -1,0 +1,31 @@
+# MessageAI Environment Variables
+# Copy this file to messageai/.env and fill in your values
+
+# OpenAI API Key (required for AI features)
+# Get from: https://platform.openai.com/api-keys
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Development Environment Toggle
+# Set to true for local development with Firebase emulators
+# Set to false for production builds
+USE_EMULATORS=false
+
+# Firebase Configuration (if not using embedded config)
+# Uncomment and use if you want to override firebase config via environment
+# FIREBASE_API_KEY=
+# FIREBASE_AUTH_DOMAIN=
+# FIREBASE_PROJECT_ID=
+# FIREBASE_STORAGE_BUCKET=
+# FIREBASE_MESSAGING_SENDER_ID=
+# FIREBASE_APP_ID=
+
+# Push Notifications (for production)
+# EAS Project ID (configured in app.json)
+EAS_PROJECT_ID=9a4e5f8e-5788-49cf-babe-ff1d1bf98ae6
+
+# Development Options
+# Enable/disable debug logging
+DEBUG_MODE=false
+
+# Performance Monitoring
+ENABLE_ANALYTICS=false

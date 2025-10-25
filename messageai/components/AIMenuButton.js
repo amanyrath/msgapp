@@ -19,9 +19,9 @@ import AIAssistant from './AIAssistant';
  * AIMenuButton - Replaces PhotoPicker with AI-first menu interface
  * Default action is AI Assistant, with photo options in submenu
  */
-export default function AIMenuButton({ 
-  onPhotoSelected, 
-  disabled = false, 
+export default function AIMenuButton({
+  onPhotoSelected,
+  disabled = false,
   chatId,
   messages = [],
   userProfiles = [],

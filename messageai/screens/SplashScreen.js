@@ -8,6 +8,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { Logger } from '../utils/logger';
+import { useLocalization } from '../context/LocalizationContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -16,6 +17,7 @@ const { width, height } = Dimensions.get('window');
  * Shows before main app loads, explains the value proposition
  */
 export default function SplashScreen({ onComplete }) {
+  const { t } = useLocalization();
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
 
@@ -68,26 +70,25 @@ export default function SplashScreen({ onComplete }) {
         
         {/* Tagline */}
         <Text style={styles.tagline}>
-          Real-time messaging platform
+          {t('splashTagline') || 'Real-time messaging platform'}
         </Text>
 
         {/* Value Proposition */}
         <View style={styles.features}>
-          <FeatureItem icon="🚀" text="Instant messaging across devices" />
-          <FeatureItem icon="👥" text="Smart group conversations" />
-          <FeatureItem icon="🔒" text="Secure & reliable messaging" />
-          <FeatureItem icon="📱" text="Native mobile experience" />
+          <FeatureItem icon="🚀" text={t('splashFeature1') || 'Instant messaging across devices'} />
+          <FeatureItem icon="👥" text={t('splashFeature2') || 'Smart group conversations'} />
+          <FeatureItem icon="🔒" text={t('splashFeature3') || 'Secure & reliable messaging'} />
+          <FeatureItem icon="📱" text={t('splashFeature4') || 'Native mobile experience'} />
         </View>
 
         {/* Target Persona */}
         <Text style={styles.persona}>
-          Built for teams and individuals who need{'\n'}
-          reliable, real-time communication
+          {t('splashPersona') || 'Built for teams and individuals who need\nreliable, real-time communication'}
         </Text>
 
         {/* Loading indicator */}
         <View style={styles.loading}>
-          <Text style={styles.loadingText}>Loading...</Text>
+          <Text style={styles.loadingText}>{t('loading') || 'Loading...'}</Text>
         </View>
       </Animated.View>
     </View>
