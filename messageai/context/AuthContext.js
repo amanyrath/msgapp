@@ -9,7 +9,8 @@ import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { createUserProfile } from '../utils/firestore';
 import { getSystemLanguage, getLanguageName } from '../utils/localization';
-import { setUserOnline, setUserOffline } from '../utils/presence';
+import { setUserOnline, setUserOffline, clearPresenceRetryQueue } from '../utils/presence';
+import { registerForPushTokenAsync, clearPushToken } from '../utils/notifications';
 
 const AuthContext = createContext({});
 
@@ -43,12 +44,24 @@ export const AuthProvider = ({ children }) => {
             icon = userData.icon || icon;
           }
           
-          await setUserOnline(user.uid, {
-            email: user.email,
-            displayName,
-            nickname,
-            icon,
-          });
+          // PERFORMANCE OPTIMIZATION: Defer non-critical operations to background
+          setTimeout(async () => {
+            try {
+              await setUserOnline(user.uid, {
+                email: user.email,
+                displayName,
+                nickname,
+                icon,
+              });
+              
+              // Register for push notifications in background
+              registerForPushTokenAsync(user.uid).catch(error => {
+                console.log('Push token registration failed:', error.message);
+              });
+            } catch (error) {
+              console.log('Background presence/push setup failed:', error.message);
+            }
+          }, 50); // Start background operations after 50ms
         } catch (error) {
           console.log('Presence not available:', error.message);
         }
@@ -122,12 +135,16 @@ export const AuthProvider = ({ children }) => {
     try {
       setError(null);
       
-      // Set user as offline before signing out (skip if RTDB not initialized)
+      // Set user as offline and clear push token before signing out
       if (user?.uid) {
         try {
           await setUserOffline(user.uid);
+          // Clear any pending presence retry operations
+          clearPresenceRetryQueue();
+          // PERFORMANCE ENHANCEMENT: Clear push token on logout
+          await clearPushToken(user.uid);
         } catch (presenceError) {
-          console.log('Could not update presence on logout:', presenceError.message);
+          console.log('Could not update presence/push token on logout:', presenceError.message);
         }
       }
       
