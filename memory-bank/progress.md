@@ -157,6 +157,37 @@
 
 ---
 
+### ✅ Group Member List Feature
+**Status**: Complete  
+**Completed**: October 26, 2025
+
+#### What Works
+1. **GroupMemberList Component**:
+   - Modal display of all group members with online status
+   - User avatars (emoji icons) with green online indicators
+   - Member names (nicknames, display names, or emails)
+   - "You" label for current user identification
+   - Real-time presence text ("Active now", "Active 5m ago", etc.)
+   - Smart sorting: current user first, then online users, then offline users
+
+2. **Header Integration**:
+   - Members button (👥) appears only for group chats (3+ members)
+   - Shows member count badge on the button
+   - Positioned alongside translation toggle in header
+   - Opens member list modal when tapped
+
+3. **Presence Integration**:
+   - Leverages existing Firebase Realtime Database presence system
+   - Uses `getPresenceText()` and `isUserOnline()` functions
+   - Shows online count in member list header
+   - Real-time updates as members go online/offline
+
+#### Files Added/Modified
+- `messageai/components/GroupMemberList.js` (NEW)
+- `messageai/screens/ChatScreen.js` (modified header and modal integration)
+
+---
+
 ### ✅ Real-Time Presence System (RTDB)
 **Status**: Complete  
 **Completed**: October 21, 2025

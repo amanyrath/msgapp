@@ -11,6 +11,7 @@ import { createUserProfile } from '../utils/firestore';
 import { getSystemLanguage, getLanguageName } from '../utils/localization';
 import { setUserOnline, setUserOffline, clearPresenceRetryQueue } from '../utils/presence';
 import { registerForPushTokenAsync, clearPushToken } from '../utils/notifications';
+import subscriptionManager from '../utils/subscriptionManager';
 
 const AuthContext = createContext({});
 
@@ -67,6 +68,9 @@ export const AuthProvider = ({ children }) => {
         }
       } else {
         console.log('User signed out');
+        // Clean up all subscriptions to prevent permission errors
+        console.log('🧹 Cleaning up all subscriptions on logout...');
+        subscriptionManager.unsubscribeAll();
       }
     });
 
@@ -147,6 +151,10 @@ export const AuthProvider = ({ children }) => {
           console.log('Could not update presence/push token on logout:', presenceError.message);
         }
       }
+      
+      // Clean up subscriptions before signing out to prevent permission errors
+      console.log('🧹 Pre-logout: Cleaning up all subscriptions...');
+      subscriptionManager.unsubscribeAll();
       
       await firebaseSignOut(auth);
       console.log('Sign out successful');

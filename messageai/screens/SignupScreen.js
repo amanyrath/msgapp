@@ -25,6 +25,7 @@ export default function SignupScreen({ navigation }) {
   const [isLoading, setIsLoading] = useState(false);
   const { signUp } = useAuth();
   const t = useTranslation();
+  const { forceLanguage } = useLocalization();
 
   // Available languages
   const availableLanguages = [
@@ -42,7 +43,9 @@ export default function SignupScreen({ navigation }) {
     'Dutch',
     'Swedish',
     'Norwegian',
-    'Finnish'
+    'Finnish',
+    'Khmer',
+    'Lao'
   ];
 
   // Detect system language for signup
@@ -56,18 +59,29 @@ export default function SignupScreen({ navigation }) {
         if (availableLanguages.includes(languageName)) {
           console.log('🌍 Signup: Using detected system language:', languageName);
           setLanguage(languageName);
+          // Force the UI to use the detected system language immediately
+          forceLanguage(languageName);
         } else {
           console.log('🇺🇸 Signup: System language not supported, defaulting to English');
           setLanguage('English');
+          forceLanguage('English');
         }
       } catch (error) {
         console.log('🇺🇸 Signup: Could not detect system language, defaulting to English');
         setLanguage('English');
+        forceLanguage('English');
       }
     };
 
     detectSystemLanguage();
-  }, []);
+  }, [forceLanguage]);
+
+  // Reset language forcing when component unmounts to not affect other screens
+  useEffect(() => {
+    return () => {
+      forceLanguage(null); // Reset to system language
+    };
+  }, [forceLanguage]);
 
   const getRandomEmoji = () => {
     const emojis = [
@@ -199,7 +213,10 @@ export default function SignupScreen({ navigation }) {
         },
         (buttonIndex) => {
           if (buttonIndex > 0) {
-            setLanguage(availableLanguages[buttonIndex - 1]);
+            const selectedLanguage = availableLanguages[buttonIndex - 1];
+            setLanguage(selectedLanguage);
+            // Immediately update the UI language for the signup form
+            forceLanguage(selectedLanguage);
           }
         }
       );
@@ -210,7 +227,11 @@ export default function SignupScreen({ navigation }) {
         t('choosePreferredLanguage') || 'Choose your preferred language',
         availableLanguages.map(lang => ({
           text: lang,
-          onPress: () => setLanguage(lang)
+          onPress: () => {
+            setLanguage(lang);
+            // Immediately update the UI language for the signup form
+            forceLanguage(lang);
+          }
         })).concat([{ text: 'Cancel', style: 'cancel' }])
       );
     }
@@ -268,6 +289,20 @@ export default function SignupScreen({ navigation }) {
         <Text style={styles.subtitle}>{t('createAccount')}</Text>
 
         <View style={styles.form}>
+          <TouchableOpacity
+            style={styles.languagePicker}
+            onPress={showLanguagePicker}
+            disabled={isLoading}
+          >
+            <Text style={styles.languagePickerLabel}>
+              {t('language') || 'Language'}
+            </Text>
+            <View style={styles.languagePickerValue}>
+              <Text style={styles.languagePickerText}>{language}</Text>
+              <Text style={styles.chevron}>›</Text>
+            </View>
+          </TouchableOpacity>
+
           <TextInput
             style={styles.input}
             placeholder={t('email')}
@@ -306,20 +341,6 @@ export default function SignupScreen({ navigation }) {
               <Text style={styles.randomButtonText}>🎲</Text>
             </TouchableOpacity>
           </View>
-
-          <TouchableOpacity
-            style={styles.languagePicker}
-            onPress={showLanguagePicker}
-            disabled={isLoading}
-          >
-            <Text style={styles.languagePickerLabel}>
-              {t('language') || 'Language'}
-            </Text>
-            <View style={styles.languagePickerValue}>
-              <Text style={styles.languagePickerText}>{language}</Text>
-              <Text style={styles.chevron}>›</Text>
-            </View>
-          </TouchableOpacity>
 
           <TextInput
             style={styles.input}
@@ -421,7 +442,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 10,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -435,7 +456,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   primaryButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     marginTop: 10,
   },
   secondaryButton: {
@@ -447,7 +468,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   secondaryButtonText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 16,
   },
   languagePicker: {

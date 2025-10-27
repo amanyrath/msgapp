@@ -1,5 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { updateDoc, doc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 // Configure how notifications should be displayed when app is in foreground
 Notifications.setNotificationHandler({
@@ -36,7 +38,7 @@ export async function registerForPushNotifications() {
         name: 'Messages',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#007AFF',
+        lightColor: '#CD853F',
         sound: 'default',
       });
     }
@@ -59,21 +61,26 @@ export async function registerForPushNotifications() {
  */
 export async function showMessageNotification({ title, body, chatId, chatData }) {
   try {
-    // Ensure title and body are valid strings
+    // PERFORMANCE OPTIMIZATION: Pre-validate and optimize notification display
     const safeTitle = title || 'New Message';
     const safeBody = body || 'New message';
     
-    await Notifications.scheduleNotificationAsync({
+    // Use non-blocking notification scheduling for instant display
+    Notifications.scheduleNotificationAsync({
       content: {
         title: safeTitle,
         body: safeBody,
         sound: 'default',
         data: { chatId, chatData },
+        priority: Notifications.AndroidNotificationPriority.HIGH, // High priority for instant display
       },
       trigger: null, // Show immediately
+    }).catch(error => {
+      // Non-blocking error handling - don't await to prevent delays
+      console.error('Error showing notification:', error);
     });
   } catch (error) {
-    console.error('Error showing notification:', error);
+    console.error('Error in notification setup:', error);
   }
 }
 
@@ -109,6 +116,71 @@ export async function setBadgeCount(count) {
     await Notifications.setBadgeCountAsync(count);
   } catch (error) {
     console.error('Error setting badge count:', error);
+  }
+}
+
+/**
+ * Register for push notifications and get push token
+ * @param {string} userId - User ID to store push token for
+ * @returns {Promise<string|null>} Push token or null if failed
+ */
+export async function registerForPushTokenAsync(userId) {
+  let token;
+  
+  try {
+    // Skip device check for now - will work on physical devices and simulators
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    
+    if (finalStatus !== 'granted') {
+      console.log('Push notification permissions not granted');
+      return null;
+    }
+    
+    // Get Expo push token for real push notifications
+    const pushTokenData = await Notifications.getExpoPushTokenAsync({
+      projectId: '9a4e5f8e-5788-49cf-babe-ff1d1bf98ae6' // Your EAS project ID
+    });
+    
+    token = pushTokenData.data;
+    console.log('📱 Push token obtained:', token);
+    
+    // Store push token in user's Firestore document
+    if (userId && token) {
+      await updateDoc(doc(db, 'users', userId), {
+        pushToken: token,
+        pushTokenUpdated: new Date()
+      });
+      console.log('✅ Push token stored in Firestore for user:', userId);
+    }
+      
+  } catch (error) {
+    console.error('Error registering for push notifications:', error);
+  }
+  
+  return token;
+}
+
+/**
+ * Clear push token for user (call on logout)
+ * @param {string} userId - User ID to clear push token for
+ */
+export async function clearPushToken(userId) {
+  try {
+    if (userId) {
+      await updateDoc(doc(db, 'users', userId), {
+        pushToken: null,
+        pushTokenUpdated: new Date()
+      });
+      console.log('🗑️ Push token cleared for user:', userId);
+    }
+  } catch (error) {
+    console.error('Error clearing push token:', error);
   }
 }
 

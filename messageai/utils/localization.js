@@ -4,12 +4,31 @@ import subscriptionManager from './subscriptionManager';
 
 /**
  * Localization Service - System language detection and UI translation
- * Integrates with existing OpenAI service for dynamic translation
+ * Uses static locale files for supported languages, falls back to OpenAI for others
  */
+
+// Static locale imports for fast loading
+import enLocale from '../locales/en.json';
+import esLocale from '../locales/es.json';
+import jaLocale from '../locales/ja.json';
+import kmLocale from '../locales/km.json';
+import loLocale from '../locales/lo.json';
 
 // Cache for translated strings to avoid API calls for repeated text
 const translationCache = new Map();
 const CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
+
+// Static locale mapping for instant loading
+const STATIC_LOCALES = {
+  'English': enLocale,
+  'Spanish': esLocale,
+  'Japanese': jaLocale,
+  'Khmer': kmLocale,
+  'Lao': loLocale
+};
+
+// Supported static locale languages
+const SUPPORTED_STATIC_LANGUAGES = ['English', 'Spanish', 'Japanese', 'Khmer', 'Lao'];
 
 /**
  * Get the user's system language
@@ -56,7 +75,9 @@ export function getLanguageName(locale = getSystemLanguage()) {
     'hu': 'Hungarian',
     'tr': 'Turkish',
     'th': 'Thai',
-    'vi': 'Vietnamese'
+    'vi': 'Vietnamese',
+    'km': 'Khmer',
+    'lo': 'Lao'
   };
 
   const languageCode = locale.split('-')[0];
@@ -110,6 +131,27 @@ function getCachedUserLanguage(userId = null) {
   
   // Fallback to system language detection
   return getLanguageName(getSystemLanguage());
+}
+
+/**
+ * Check if a language has static locale support
+ * @param {string} language - Language name (e.g., 'Spanish', 'Japanese')
+ * @returns {boolean}
+ */
+export function hasStaticLocaleSupport(language) {
+  return SUPPORTED_STATIC_LANGUAGES.includes(language);
+}
+
+/**
+ * Load static locale for a language
+ * @param {string} language - Language name (e.g., 'Spanish', 'Japanese')
+ * @returns {object|null} Static locale object or null if not supported
+ */
+export function loadStaticLocale(language) {
+  if (hasStaticLocaleSupport(language)) {
+    return STATIC_LOCALES[language];
+  }
+  return null;
 }
 
 /**
@@ -169,7 +211,7 @@ export async function translateUIText(text, targetLanguage = null, options = {})
 }
 
 /**
- * Batch translate multiple UI strings
+ * Batch translate multiple UI strings using static locales or API fallback
  * @param {object} texts - Object with key-value pairs of texts to translate
  * @param {string} targetLanguage - Target language (optional, uses cached user preference)
  * @param {object} options - Options including userId for cached preference lookup
@@ -183,6 +225,16 @@ export async function batchTranslateUITexts(texts, targetLanguage = null, option
     return texts;
   }
 
+  // FAST PATH: Use static locale if available
+  const staticLocale = loadStaticLocale(finalTargetLanguage);
+  if (staticLocale) {
+    console.log(`🚀 Loading ${finalTargetLanguage} UI strings from static locale (instant)`);
+    // Return static translations directly - they match the keys in DEFAULT_UI_STRINGS
+    return staticLocale;
+  }
+
+  // FALLBACK PATH: Use API translation for unsupported languages
+  console.log(`🌐 Loading ${finalTargetLanguage} UI strings via API translation`);
   const translatedTexts = {};
   const translationPromises = [];
 
@@ -313,6 +365,7 @@ export const DEFAULT_UI_STRINGS = {
   // Photo/Media
   takePhoto: '📸 Take Photo',
   choosePhoto: '🖼️ Choose Photo',
+  recordVoiceMessage: '🎤 Record Voice Message',
   aiAssistantOption: '🤖 AI Assistant',
   whatWouldYouLikeToDo: 'What would you like to do?',
   chooseAction: 'Choose Action',
@@ -354,6 +407,63 @@ export const DEFAULT_UI_STRINGS = {
   noMessagesFoundTimeframe: 'No messages found in the specified timeframe ({timeRange}).',
   noMessagesSummaryTimeframe: 'No messages found to summarize for the timeframe: {timeRange}.',
   
+  // Insights Feature
+  insights: 'Insights',
+  chat: 'Chat',
+  loadingInsights: 'Loading insights...',
+  noInsightsYet: 'No insights yet',
+  insightsExplanation: 'I\'ll extract structured data (dates, locations, action items) from your messages automatically.',
+  testAIExtraction: 'Test AI Extraction',
+  testResult: 'Test Result',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+  
+  // AI Assistant Quick Actions
+  explainCulture: 'Explain Culture',
+  smartReplies: 'Smart Replies',
+  makeCasual: 'Make Casual',
+  makeFormal: 'Make Formal',
+  culturalTips: 'Cultural Tips',
+  
+  // AI Assistant Contextual Suggestions
+  summarizeChatHistory: 'Summarize chat history (last week, month, or all messages)',
+  explainCulturalContext: 'Explain cultural context and slang',
+  suggestResponses: 'Suggest appropriate responses',
+  analyzePatterns: 'Analyze conversation patterns',
+  generateSmartReplies: 'Generate smart reply suggestions',
+  helpSpanishCommunication: 'Help with Spanish communication',
+  explainMusicTerminology: 'Explain music/rave terminology',
+  
+  // AI Assistant Messages
+  assistantWelcome: 'Hi! I\'m your AI assistant for international communication. I can help you with:',
+  assistantPrompt: 'What would you like me to help you with?',
+  summarizeHowFarBack: 'I can summarize the chat history for you! How long back would you like me to summarize?\n\n• The last week\n• The last month\n• Today only\n• All messages\n\nPlease let me know your preference.',
+  
+  // AI Assistant Error Messages
+  errorTryAgain: 'Sorry, I encountered an error. Please try again.',
+  errorGeneratingSummary: 'Sorry, I encountered an error while generating the summary:',
+  pleaseRetry: 'Please try again.',
+  errorProcessingSummary: 'Sorry, I encountered an error while processing the summary. Please try again.',
+  errorAdjustingFormality: 'Sorry, I encountered an error adjusting formality. Please try again.',
+  errorAnalyzingCulture: 'Sorry, I encountered an error analyzing cultural context. Please try again.',
+  errorGeneratingReplies: 'Sorry, I encountered an error generating smart replies. Please try again.',
+  
+  // Additional AI Assistant Messages
+  noRecentMessagesFormality: 'No recent messages to adjust for formality.',
+  noRecentMessagesCultural: 'No recent messages to analyze for cultural context.',
+  noRecentMessagesReplies: 'No recent messages to generate replies for.',
+  explainCulturalContextRequest: 'Can you explain any cultural context or slang in recent messages?',
+  culturalTipsRequest: 'Can you give me cultural tips for better communication in this conversation?',
+  loadingConversation: 'Loading conversation...',
+  
+  // AI Assistant Request Messages
+  summarizeWeekRequest: 'Please summarize the chat history from the last week',
+  summarizeTodayRequest: 'Please summarize today\'s chat history',
+  summarizeAllRequest: 'Please summarize all our chat history',
+  adjustToneCasualRequest: 'Please adjust the tone of recent messages to be more casual',
+  adjustToneFormalRequest: 'Please adjust the tone of recent messages to be more formal',
+  
   // Language Settings
   languageUpdated: 'Language Updated',
   languageChangedTo: 'Language changed to',
@@ -362,7 +472,7 @@ export const DEFAULT_UI_STRINGS = {
   failedToLoadProfile: 'Failed to load profile: {error}',
   
   // App Info
-  appName: 'MessageAI',
+  appName: 'Babble',
   tagline: 'Real-time messaging platform',
   builtForTeams: 'Built for teams and individuals who need\nreliable, real-time communication',
   
@@ -375,6 +485,8 @@ export const DEFAULT_UI_STRINGS = {
   translation: 'Translation',
   translationFailed: 'Translation failed',
   culturalContext: 'Cultural Context',
+  analyzingCulturalContext: 'Analyzing cultural context...',
+  culturalAnalysisFailed: 'Cultural analysis failed',
   formalityNote: 'Original Message Tone',
   regionalNotes: 'Regional Context',
   

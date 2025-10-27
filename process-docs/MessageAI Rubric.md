@@ -18,23 +18,7 @@ Total Points: 100
 * Typing indicators work smoothly  
 * Presence updates (online/offline) sync immediately
 
-**Good (9-10 points)**
 
-* Consistent delivery under 300ms  
-* Occasional minor delays with heavy load  
-* Typing indicators mostly responsive
-
-**Satisfactory (6-8 points)**
-
-* Messages deliver but noticeable delays (300-500ms)  
-* Some lag during rapid messaging  
-* Typing indicators work but laggy
-
-**Poor (0-5 points)**
-
-* Inconsistent delivery  
-* Frequent delays over 500ms  
-* Broken under concurrent messaging
 
 ### **Offline Support & Persistence (12 points)**
 
@@ -93,19 +77,6 @@ Total Points: 100
 * Read receipts mostly work  
 * Minor issues under heavy use
 
-**Satisfactory (5-7 points)**
-
-* Basic group chat functionality  
-* Attribution works but unclear  
-* Read receipts unreliable  
-* Performance degrades with 4+ users
-
-**Poor (0-4 points)**
-
-* Group chat broken or unusable  
-* Messages get mixed up  
-* Can't tell who sent what  
-* Crashes with multiple users
 
 ## **Section 2: Mobile App Quality (20 points)**
 
@@ -126,19 +97,7 @@ Total Points: 100
 * Push notifications work  
 * Minor sync delays
 
-**Satisfactory (3-4 points)**
 
-* Basic lifecycle support  
-* Slow reconnection (5+ seconds)  
-* Push notifications unreliable  
-* Some message loss
-
-**Poor (0-2 points)**
-
-* Backgrounding breaks connection  
-* Manual restart required  
-* Push notifications don't work  
-* Frequent message loss
 
 ### **Performance & UX (12 points)**
 

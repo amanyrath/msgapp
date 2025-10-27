@@ -1,5 +1,5 @@
 import { translateText } from './aiService';
-import { shouldShowTranslationForChat } from './chatLanguageAnalysis';
+// Removed chat language analysis - users can speak any language!
 import { getCachedUserLanguagePreference } from './languageIntegration';
 
 // PRIVACY: Pre-generated translations are CLIENT-SIDE ONLY
@@ -38,24 +38,9 @@ export async function generateProactiveTranslations(chatId, messages, userId, op
       return { success: false, reason: 'No user language preference' };
     }
 
-    // Check if this chat needs translations at all
-    const translationRecommendation = await shouldShowTranslationForChat(
-      chatId,
-      messages,
-      userId,
-      { forceRefresh }
-    );
-
-    if (!translationRecommendation.shouldShow) {
-      console.log('🚫 Chat does not need translations:', translationRecommendation.reason);
-      return { 
-        success: true, 
-        translationsGenerated: 0, 
-        reason: 'No translations needed',
-        userLanguage,
-        chatLanguage: translationRecommendation.chatLanguage
-      };
-    }
+    // SIMPLIFIED: Always generate translations for foreign messages
+    // No chat language analysis - each user can speak their own language!
+    console.log('✅ Generating translations for all foreign messages (no chat language restrictions)');
 
     // Filter messages that need translation (from others, not AI, with text content)
     const messagesToTranslate = messages
@@ -74,8 +59,7 @@ export async function generateProactiveTranslations(chatId, messages, userId, op
         success: true, 
         translationsGenerated: 0, 
         reason: 'No translatable messages',
-        userLanguage,
-        chatLanguage: translationRecommendation.chatLanguage
+        userLanguage
       };
     }
 
@@ -110,7 +94,7 @@ export async function generateProactiveTranslations(chatId, messages, userId, op
         translationsGenerated: Object.keys(preGeneratedTranslations).length,
         preGeneratedTranslations,
         userLanguage,
-        chatLanguage: translationRecommendation.chatLanguage,
+        chatLanguage: 'Mixed', // No single chat language - users speak freely!
         fromCache: true
       };
     }
@@ -129,7 +113,7 @@ export async function generateProactiveTranslations(chatId, messages, userId, op
           const result = await translateText({
             text: message.text,
             targetLanguage: userLanguage,
-            sourceLanguage: translationRecommendation.chatLanguage,
+            sourceLanguage: 'auto', // Auto-detect source language per message
             formality: 'casual',
             culturalContext: {
               chatContext: 'Proactive chat translation',
@@ -206,7 +190,7 @@ export async function generateProactiveTranslations(chatId, messages, userId, op
       translationsGenerated: totalGenerated,
       preGeneratedTranslations: allTranslations,
       userLanguage,
-      chatLanguage: translationRecommendation.chatLanguage,
+      chatLanguage: 'Mixed', // No single chat language - users speak freely!
       fromCache: false,
       cacheStats: {
         newTranslations: totalGenerated,

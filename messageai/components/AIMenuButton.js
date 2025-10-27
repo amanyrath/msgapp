@@ -21,15 +21,16 @@ import AIAssistant from './AIAssistant';
  */
 export default function AIMenuButton({
   onPhotoSelected,
+  onVoiceMessageSelected, // New prop for voice message callback
   disabled = false,
   chatId,
   messages = [],
   userProfiles = [],
   currentUser,
-  onAutoTranslateChange, // Auto-translate state changes
   languageDetected = false, // New prop to indicate different language detected
   smartTextData = null, // Smart text data for assistance
-  onSmartTextPress // Callback when smart text assistance is needed
+  onSmartTextPress, // Callback when smart text assistance is needed
+  onNavigateToMessage // New prop to handle navigation to source message from insights
 }) {
   const [showAIAssistant, setShowAIAssistant] = useState(false);
   const t = useTranslation();
@@ -87,7 +88,7 @@ export default function AIMenuButton({
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: [t('cancel'), t('aiAssistantOption'), t('takePhoto'), t('choosePhoto')],
+          options: [t('cancel'), t('aiAssistantOption'), t('takePhoto'), t('choosePhoto'), t('recordVoiceMessage')],
           cancelButtonIndex: 0,
           title: t('whatWouldYouLikeToDo')
         },
@@ -103,7 +104,8 @@ export default function AIMenuButton({
           { text: t('cancel'), style: 'cancel' },
           { text: t('aiAssistantOption'), onPress: () => handleMenuSelection(1) },
           { text: t('takePhoto'), onPress: () => handleMenuSelection(2) },
-          { text: t('choosePhoto'), onPress: () => handleMenuSelection(3) }
+          { text: t('choosePhoto'), onPress: () => handleMenuSelection(3) },
+          { text: t('recordVoiceMessage'), onPress: () => handleMenuSelection(4) }
         ]
       );
     }
@@ -119,6 +121,11 @@ export default function AIMenuButton({
         break;
       case 3: // Choose Photo
         await handlePhotoOption('library');
+        break;
+      case 4: // Voice Message
+        if (onVoiceMessageSelected) {
+          onVoiceMessageSelected();
+        }
         break;
       default:
         break;
@@ -218,7 +225,7 @@ export default function AIMenuButton({
           messages={messages}
           userProfiles={userProfiles}
           currentUser={currentUser}
-          onAutoTranslateChange={onAutoTranslateChange}
+          onNavigateToMessage={onNavigateToMessage}
         />
       </Modal>
     </View>
@@ -230,7 +237,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,

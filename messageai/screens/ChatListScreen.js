@@ -353,7 +353,7 @@ export default function ChatListScreen({ navigation }) {
 
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+          <ActivityIndicator size="large" color="#CD853F" />
         </View>
       ) : (
         <FlatList
@@ -457,7 +457,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -498,7 +498,7 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
   },
   unreadBadge: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     borderRadius: 10,
     minWidth: 20,
     height: 20,

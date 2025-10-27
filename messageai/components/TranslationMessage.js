@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
     borderColor: '#e1e5e9',
     padding: 12,
     borderLeftWidth: 3,
-    borderLeftColor: '#007AFF',
+    borderLeftColor: '#CD853F',
   },
   header: {
     flexDirection: 'row',
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
   headerText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#CD853F',
   },
   confidence: {
     fontSize: 10,

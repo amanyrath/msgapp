@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { useTranslation } from '../context/LocalizationContext';
-import { translateText, detectLanguage } from '../utils/aiService';
+import { translateText, detectLanguage, rewriteTone } from '../utils/aiService';
 
 /**
  * SmartTextAssistant - Modal for tone adjustment and text improvement suggestions
@@ -87,28 +87,10 @@ export default function SmartTextAssistant({
   // Generate tone-adjusted suggestion
   const generateToneSuggestion = async (text, language, tone) => {
     try {
-      const prompt = `Please rewrite the following text to be more ${tone} while keeping the same meaning and language (${language}):
-
-"${text}"
-
-Requirements:
-- Keep the same language (${language})
-- Make it ${tone === 'casual' ? 'more relaxed, friendly, and conversational' : 'more professional, polite, and respectful'}
-- Preserve the original meaning
-- Make it sound natural for native speakers
-
-Respond with only the rewritten text.`;
-
-      const result = await translateText({
-        text: prompt,
-        targetLanguage: language,
-        sourceLanguage: 'English',
-        formality: tone,
-        culturalContext: {
-          operation: 'tone_adjustment',
-          targetTone: tone,
-          preserveLanguage: language
-        }
+      const result = await rewriteTone({
+        text: text,
+        targetTone: tone,
+        language: language
       });
 
       if (result.success) {
@@ -118,11 +100,11 @@ Respond with only the rewritten text.`;
             (t('makeCasual') || '😊 Make more casual') : 
             (t('makeFormal') || '🎩 Make more formal'),
           originalText: text,
-          suggestedText: result.translation,
+          suggestedText: result.rewrittenText,
           explanation: tone === 'casual' ? 
             (t('casualExplanation') || 'This version sounds more relaxed and friendly') :
             (t('formalExplanation') || 'This version sounds more professional and polite'),
-          confidence: result.confidence,
+          confidence: 0.95, // High confidence for focused rewriting
         };
       }
     } catch (error) {
@@ -134,39 +116,21 @@ Respond with only the rewritten text.`;
   // Generate naturalness suggestion
   const generateNaturalnessSuggestion = async (text, language) => {
     try {
-      const prompt = `Please rewrite the following text to sound more natural and fluent for native ${language} speakers, while keeping the same meaning:
-
-"${text}"
-
-Requirements:
-- Keep the same language (${language})
-- Make it sound like something a native speaker would naturally say
-- Fix any awkward phrasing or word choices
-- Preserve the original meaning and tone
-- Use appropriate idioms or expressions if helpful
-
-Respond with only the rewritten text.`;
-
-      const result = await translateText({
-        text: prompt,
-        targetLanguage: language,
-        sourceLanguage: 'English',
-        formality: 'casual',
-        culturalContext: {
-          operation: 'naturalness_improvement',
-          preserveLanguage: language,
-          focusOnFluency: true
-        }
+      // Use rewriteTone with 'casual' to make text more natural
+      const result = await rewriteTone({
+        text: text,
+        targetTone: 'casual', // Casual tone tends to be more natural
+        language: language
       });
 
-      if (result.success) {
+      if (result.success && result.rewrittenText !== text) {
         return {
           type: 'natural',
           label: t('makeNatural') || '🌟 Make more natural',
           originalText: text,
-          suggestedText: result.translation,
+          suggestedText: result.rewrittenText,
           explanation: t('naturalExplanation') || 'This version sounds more natural for native speakers',
-          confidence: result.confidence,
+          confidence: 0.90,
         };
       }
     } catch (error) {
@@ -275,7 +239,7 @@ Respond with only the rewritten text.`;
           {/* Loading state */}
           {loading && (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#007AFF" />
+              <ActivityIndicator size="large" color="#CD853F" />
               <Text style={styles.loadingText}>
                 {t('analyzingText') || 'Analyzing your text...'}
               </Text>
@@ -409,7 +373,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   retryButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,
@@ -438,7 +402,7 @@ const styles = StyleSheet.create({
   suggestionLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#CD853F',
     marginBottom: 8,
   },
   suggestionText: {

@@ -117,7 +117,7 @@ export default function ChatSettingsScreen({ route, navigation }) {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#007AFF" size="small" />
+            <ActivityIndicator color="#CD853F" size="small" />
           ) : (
             <Text style={styles.saveText}>{t('save')}</Text>
           )}
@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   cancelText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   saveText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -275,7 +275,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     alignItems: 'center',
     justifyContent: 'center',
   },

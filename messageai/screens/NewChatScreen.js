@@ -153,7 +153,7 @@ export default function NewChatScreen({ navigation }) {
 
       {loadingUsers ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+          <ActivityIndicator size="large" color="#CD853F" />
         </View>
       ) : (
         <FlatList
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   cancelText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -278,8 +278,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkboxSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+    backgroundColor: '#CD853F',
+    borderColor: '#CD853F',
   },
   checkboxText: {
     color: '#fff',
@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
     margin: 16,
     paddingVertical: 14,
     borderRadius: 28,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     alignItems: 'center',
   },
   createButtonDisabled: {

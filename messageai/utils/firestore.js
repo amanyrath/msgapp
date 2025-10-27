@@ -31,6 +31,14 @@ import { db } from '../config/firebase';
  *   - lastMessageSenderId: string - User ID of who sent the last message
  *   - type: 'direct' | 'group' - Chat type
  * 
+ * /chats/{chatId}/autoTranslationSettings/{userId}
+ *   - enabled: boolean - Auto translation enabled for this user in this chat
+ *   - targetLanguage: string - Target language for translations (e.g., "English", "Spanish")
+ *   - formality: string - Translation formality ("casual" | "formal")
+ *   - lastUpdated: timestamp - When settings were last modified
+ *   - userId: string - User ID these settings belong to
+ *   - chatId: string - Chat ID these settings apply to
+ * 
  * /chats/{chatId}/messages/{messageId}
  *   - senderId: string
  *   - senderEmail: string
@@ -39,7 +47,12 @@ import { db } from '../config/firebase';
  *     - url: string - Firebase Storage download URL
  *     - width: number - Image width
  *     - height: number - Image height
- *   - type: 'text' | 'photo' | 'ai' - Message type
+ *   - audio: object (for audio messages)
+ *     - url: string - Firebase Storage download URL
+ *     - duration: number - Duration in seconds
+ *     - fileName: string - Original filename
+ *     - size: number - File size in bytes
+ *   - type: 'text' | 'photo' | 'audio' | 'ai' - Message type
  *   - timestamp: serverTimestamp
  *   - readBy: [userId1, userId2, ...] - array of users who read the message
  *   - senderName: string - Sender's display name/nickname (optional)
@@ -245,6 +258,61 @@ export const sendPhotoMessage = async (chatId, senderId, senderEmail, photo, sen
       return messageRef.id;
     } catch (error) {
       console.error('Error sending photo message:', error);
+      throw error;
+    }
+  });
+};
+
+/**
+ * Send an audio message in a chat
+ * @param {string} chatId - Chat ID
+ * @param {string} senderId - Sender's user ID
+ * @param {string} senderEmail - Sender's email
+ * @param {Object} audio - Audio data
+ * @param {string} audio.url - Firebase Storage download URL
+ * @param {number} audio.duration - Duration in seconds
+ * @param {string} audio.fileName - Original filename
+ * @param {number} audio.size - File size in bytes
+ * @param {string} senderName - Sender's display name/nickname (optional)
+ * @returns {Promise<string>} - Message ID
+ */
+export const sendAudioMessage = async (chatId, senderId, senderEmail, audio, senderName = null) => {
+  return retryOperation(async () => {
+    try {
+      const messagesRef = collection(db, 'chats', chatId, 'messages');
+      
+      const messageData = {
+        senderId,
+        senderEmail,
+        audio,
+        type: 'audio',
+        timestamp: serverTimestamp(),
+        readBy: [senderId], // Sender has "read" their own message
+      };
+
+      // Add sender name if provided
+      if (senderName) {
+        messageData.senderName = senderName;
+      }
+      
+      const messageRef = await addDoc(messagesRef, messageData);
+      
+      // Update chat's last message (show "🎵 Voice message" as preview)
+      const chatRef = doc(db, 'chats', chatId);
+      await setDoc(
+        chatRef,
+        {
+          lastMessage: `🎵 Voice message (${Math.floor(audio.duration)}s)`,
+          lastMessageTime: serverTimestamp(),
+          lastMessageSenderId: senderId, // Track who sent the last message
+        },
+        { merge: true }
+      );
+      
+      console.log('Audio message sent:', messageRef.id);
+      return messageRef.id;
+    } catch (error) {
+      console.error('Error sending audio message:', error);
       throw error;
     }
   });
@@ -627,6 +695,135 @@ export const deleteChat = async (chatId, userId) => {
     } catch (error) {
       console.error('Error deleting chat:', error);
       throw error;
+    }
+  });
+};
+
+/**
+ * Conversation Insights Storage
+ * Stores and retrieves structured data extracted from messages
+ */
+
+/**
+ * Store conversation insights extracted from a message
+ * @param {string} chatId - Chat ID
+ * @param {string} messageId - Message ID that generated these insights
+ * @param {Array} extractions - Structured data extractions from AI
+ * @param {object} metadata - Additional metadata (sender, timestamp, etc.)
+ * @returns {Promise<string>} - Insight document ID
+ */
+export const storeConversationInsights = async (chatId, messageId, extractions, metadata = {}) => {
+  return retryOperation(async () => {
+    if (!extractions || extractions.length === 0) {
+      return null; // No insights to store
+    }
+
+    const insightData = {
+      chatId,
+      messageId,
+      extractions,
+      createdAt: serverTimestamp(),
+      processedAt: new Date().toISOString(),
+      ...metadata
+    };
+
+    const insightsRef = collection(db, 'chats', chatId, 'insights');
+    const docRef = await addDoc(insightsRef, insightData);
+    
+    console.log('📊 Stored conversation insights:', docRef.id, 'extractions:', extractions.length);
+    return docRef.id;
+  });
+};
+
+/**
+ * Get all conversation insights for a chat
+ * @param {string} chatId - Chat ID
+ * @param {number} limitCount - Maximum number of insights to return (default: 50)
+ * @returns {Promise<Array>} - Array of insight objects
+ */
+export const getChatInsights = async (chatId, limitCount = 50) => {
+  return retryOperation(async () => {
+    const insightsRef = collection(db, 'chats', chatId, 'insights');
+    const q = query(
+      insightsRef,
+      orderBy('createdAt', 'desc'),
+      limit(limitCount)
+    );
+    
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  });
+};
+
+/**
+ * Subscribe to real-time conversation insights for a chat
+ * @param {string} chatId - Chat ID  
+ * @param {function} callback - Callback function called with insights array
+ * @param {number} limitCount - Maximum number of insights (default: 50)
+ * @returns {function} - Unsubscribe function
+ */
+export const subscribeToConversationInsights = (chatId, callback, limitCount = 50) => {
+  const insightsRef = collection(db, 'chats', chatId, 'insights');
+  const q = query(
+    insightsRef,
+    orderBy('createdAt', 'desc'),
+    limit(limitCount)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const insights = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    
+    console.log('📊 Insights updated:', insights.length, 'items');
+    callback(insights);
+  }, (error) => {
+    console.error('❌ Error subscribing to insights:', error);
+    callback([]);
+  });
+};
+
+/**
+ * Check if a message has already been processed for insights
+ * @param {string} chatId - Chat ID
+ * @param {string} messageId - Message ID
+ * @returns {Promise<boolean>} - True if already processed
+ */
+export const isMessageProcessedForInsights = async (chatId, messageId) => {
+  return retryOperation(async () => {
+    const insightsRef = collection(db, 'chats', chatId, 'insights');
+    const q = query(insightsRef, where('messageId', '==', messageId));
+    
+    const snapshot = await getDocs(q);
+    return !snapshot.empty;
+  });
+};
+
+/**
+ * Delete insights for a specific message (when message is deleted)
+ * @param {string} chatId - Chat ID
+ * @param {string} messageId - Message ID
+ * @returns {Promise<void>}
+ */
+export const deleteMessageInsights = async (chatId, messageId) => {
+  return retryOperation(async () => {
+    const insightsRef = collection(db, 'chats', chatId, 'insights');
+    const q = query(insightsRef, where('messageId', '==', messageId));
+    
+    const snapshot = await getDocs(q);
+    const batch = writeBatch(db);
+    
+    snapshot.docs.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+    
+    if (!snapshot.empty) {
+      await batch.commit();
+      console.log('📊 Deleted insights for message:', messageId);
     }
   });
 };

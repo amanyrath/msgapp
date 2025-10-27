@@ -67,7 +67,7 @@ export default function ImagePlaceholder({
         {showSpinner && (
           <ActivityIndicator 
             size="small" 
-            color="#007AFF" 
+            color="#CD853F" 
             style={styles.spinner} 
           />
         )}

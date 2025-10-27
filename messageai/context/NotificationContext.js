@@ -18,7 +18,7 @@ export function NotificationProvider({ children }) {
 
   // Track the currently active chat so we don't show notifications for it
   const setActiveChatId = (chatId) => {
-    console.log('🔔 Active chat changed:', chatId);
+    // PHASE 1: Removed logging for performance
     setActiveChat(chatId);
   };
 
@@ -33,77 +33,58 @@ export function NotificationProvider({ children }) {
 
     // Reset startup time for new user session to prevent notifications from existing messages
     startupTime.current = Date.now();
-    console.log('🔔 Setting up OPTIMIZED notification system for user:', user.uid);
 
     // OPTIMIZED: Subscribe to chat updates using shared cached data
     const unsubscribeChats = subscriptionManager.subscribe(
       `user-chats-${user.uid}`, // Same key as ChatListScreen - shares the subscription!
       (callback) => subscribeToUserChats(user.uid, callback),
       (chats) => {
-        console.log('🔔 Processing chats for notifications:', chats.length, 'chats');
+        // PHASE 1 OPTIMIZATION: Reduced logging, early exit, optimized operations
+        let processedNotification = false;
         
-        // Process chat updates for notifications (much more efficient)
-        chats.forEach((chat) => {
-          // Check if this chat has a newer message than we've seen
-          const lastMessage = chat.lastMessage;
-          const lastMessageTime = chat.lastMessageTime;
-          const lastMessageSenderId = chat.lastMessageSenderId;
-          
-          if (!lastMessage || !lastMessageTime) return;
-          
-          // Skip notifications for own messages (includes Personal Notes)
-          if (lastMessageSenderId === user?.uid) {
-            console.log('🔕 Notification skipped: own message');
-            return;
+        // Process chat updates for notifications - optimized with early exit
+        for (const chat of chats) {
+          // PHASE 1: Early validation without logging
+          if (!chat.lastMessage || !chat.lastMessageTime || chat.lastMessageSenderId === user?.uid) {
+            continue;
           }
           
-          // Skip notifications for messages that existed before app startup (5 second grace period)
-          const messageTime = lastMessageTime?.toMillis?.() || 0;
-          const gracePeriod = 5000; // 5 seconds
-          if (messageTime < startupTime.current + gracePeriod) {
-            console.log('🔕 Notification skipped: pre-existing message from startup');
-            return;
+          // PHASE 1: Optimized timestamp operations
+          const messageTimeMs = chat.lastMessageTime?.toMillis?.();
+          if (!messageTimeMs || messageTimeMs < startupTime.current + 5000) {
+            continue;
           }
           
-          const messageKey = `${chat.id}-${lastMessageTime?.toMillis?.() || Date.now()}`;
+          // PHASE 1: Optimized message key generation (single operation)
+          const messageKey = `${chat.id}-${messageTimeMs}`;
           
-          // Skip if already processed
+          // PHASE 1: Optimized Set operations
           if (processedMessages.current.has(messageKey)) {
-            return;
+            continue;
           }
-          processedMessages.current.add(messageKey);
-
-          // Use the message text directly (no need to parse sender info)
-          const messageText = lastMessage;
-          const senderName = 'New Message'; // We'll improve this with user profiles later
           
-          // Don't show notification if chat is currently active
+          // PHASE 1: Only add to Set if we're going to show notification
           if (chat.id !== activeChat) {
-            // Add small delay to prevent rapid-fire notifications
+            processedMessages.current.add(messageKey);
+            
+            // Cancel any pending notification to prevent duplicates
             if (notificationTimeout.current) {
               clearTimeout(notificationTimeout.current);
             }
             
-            notificationTimeout.current = setTimeout(() => {
-              // Double-check conditions after delay
-              if (chat.id !== activeChat) {
-                // Show notification
+            // Show notification immediately without delay
                 showMessageNotification({
-                  title: senderName || 'New Message',
-                  body: messageText || 'New message',
+              title: 'New Message',
+              body: chat.lastMessage || 'New message',
                   chatId: chat.id,
                   chatData: chat,
                 });
 
-                console.log(`📬 Notification shown: "${senderName}: ${messageText}"`);
-              } else {
-                console.log('🔕 Notification skipped (active chat)');
-              }
-            }, 100);
-          } else {
-            console.log('🔕 Notification skipped: active chat');
+            processedNotification = true;
+            // PHASE 1: Early exit - stop processing after first notification
+            break;
           }
-        });
+        }
       },
       {
         cache: true,
@@ -113,7 +94,7 @@ export function NotificationProvider({ children }) {
     );
 
     return () => {
-      console.log('🔔 Cleaning up notification subscriptions');
+      // PHASE 1: Optimized cleanup without logging
       unsubscribeChats();
       messageSubscriptions.current.forEach((unsubscribe) => unsubscribe());
       messageSubscriptions.current.clear();
@@ -125,7 +106,7 @@ export function NotificationProvider({ children }) {
 
   // Separate effect to handle active chat changes without restarting subscriptions
   useEffect(() => {
-    console.log('🔔 Active chat updated:', activeChat);
+    // PHASE 1: Removed logging for performance
   }, [activeChat]);
 
   // Clean up processed messages periodically to prevent memory leak

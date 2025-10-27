@@ -532,9 +532,20 @@ export const subscribeToTypingUsers = (chatId, callback) => {
       }, (error) => {
         console.error('❌ Error in typing listener:', error);
         
-        // If network error, clear typing indicators
-        if (error.code === 'permission-denied' || 
-            error.code === 'network-request-failed' ||
+        // Handle permission denied gracefully (user logged out)
+        if (error.code === 'PERMISSION_DENIED' || 
+            error.code === 'permission-denied' ||
+            error.message?.includes('permission_denied') ||
+            error.message?.includes('Client doesn\'t have permission')) {
+          console.log('📤 Permission denied for typing listener - user likely logged out, clearing indicators');
+          callback([]);
+          // Don't attempt to reconnect on permission errors
+          isSubscribed = false;
+          return;
+        }
+        
+        // If network error, clear typing indicators  
+        if (error.code === 'network-request-failed' ||
             error.message?.includes('network') ||
             error.message?.includes('offline')) {
           callback([]);

@@ -72,7 +72,7 @@ const getOpenAIClient = () => {
 
 /**
  * AI Service for International Communicator features
- * Handles translation, cultural context, and smart replies
+ * Handles translation, cultural context, smart replies, and structured data extraction
  */
 
 /**
@@ -118,7 +118,63 @@ function validateTranslationQuality(result) {
 }
 
 /**
- * Translate text using GPT-4o mini with cultural context
+ * FAST translation function - translation only, no cultural analysis
+ * @param {string} text - Text to translate
+ * @param {string} targetLanguage - Target language (e.g., 'Spanish', 'English')
+ * @param {string} sourceLanguage - Source language (optional)
+ * @param {string} formality - Formality level ('casual', 'formal', 'professional')
+ * @returns {Promise<object>} Fast translation result
+ */
+export async function fastTranslateText({
+  text,
+  targetLanguage,
+  sourceLanguage = null,
+  formality = 'casual'
+}) {
+  try {
+    const systemPrompt = `You are a fast, accurate translator. Translate the given text to ${targetLanguage} with ${formality} tone. Maintain natural phrasing and cultural appropriateness.
+
+Response format (JSON):
+{
+  "translation": "naturally translated text",
+  "detectedLanguage": "source language",
+  "confidence": 0.95
+}`;
+
+    const userPrompt = `Translate to ${targetLanguage}: "${text}"${sourceLanguage ? `\nSource language: ${sourceLanguage}` : ''}`;
+
+    const client = getOpenAIClient();
+    const response = await client.chat.completions.create({
+      model: 'gpt-3.5-turbo', // Faster model for simple translation
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.2, // Lower temperature for consistency
+      max_tokens: 300, // Much smaller response
+      response_format: { type: 'json_object' }
+    });
+
+    const result = JSON.parse(response.choices[0].message.content);
+    
+    return {
+      success: true,
+      ...result,
+      usage: response.usage,
+      fastTranslation: true // Mark as fast translation
+    };
+  } catch (error) {
+    console.error('Fast translation error:', error);
+    return {
+      success: false,
+      error: error.message,
+      translation: text // Fallback to original text
+    };
+  }
+}
+
+/**
+ * Full translation with cultural context - slower but comprehensive
  * @param {string} text - Text to translate
  * @param {string} targetLanguage - Target language (e.g., 'Spanish', 'English')
  * @param {string} sourceLanguage - Source language (optional, will auto-detect if not provided)
@@ -284,39 +340,47 @@ export async function explainCulturalContext({ text, userLanguage, interfaceLang
   try {
     const systemPrompt = getUniversalSystemPrompt('cultural_analysis') + `
 
-ENHANCED ANALYSIS REQUIREMENTS:
-1. Identify ALL cultural elements: slang, idioms, regional expressions, generational language, professional jargon
-2. Provide context-rich explanations with cultural background
-3. Detect subtle cultural nuances and communication patterns
-4. Offer proactive cultural intelligence and communication tips
-5. Include regional variations and appropriate usage guidance
+CRITICAL INSTRUCTION - ANALYZE THE ORIGINAL MESSAGE ONLY:
+- ALL cultural analysis must focus on the ORIGINAL MESSAGE that was sent/received
+- Explain what the ORIGINAL words/phrases mean in the sender's culture  
+- Do NOT analyze or discuss any translation - only analyze the source text
+- Focus on the original language's cultural nuances from the SOURCE culture
+
+LANGUAGE REQUIREMENT:
+- Respond ENTIRELY in ${userLanguage}
+- All cultural explanations must be written in ${userLanguage}
+- If ${userLanguage} is not English, do NOT use English in your response
+
+CONCISE CULTURAL CONTEXT REQUIREMENTS:
+1. Provide a single, concise cultural insight (100-300 characters)
+2. Focus on the most important cultural element of the ORIGINAL message only
+3. Be brief but helpful for cross-cultural understanding
+4. No technical details or extensive explanations
+5. Explain the SOURCE culture's communication style, not any translation
+
+EXAMPLES OF CORRECT ANALYSIS:
+- If original is "¡Órale!": Explain this Mexican slang shows excitement/surprise in Mexican culture
+- If original is "あけましておめでとう": Explain the formality level and respect shown in Japanese culture  
+- If original is "Cheers mate!": Explain British informal friendliness and pub culture context
+DO NOT explain what any translation means - explain the cultural meaning of the SOURCE text!
 
 Response format (JSON):
 {
-  "explanations": [
-    {
-      "term": "word or phrase",
-      "explanation": "detailed meaning with context",
-      "category": "slang|idiom|cultural_reference|technical_term|generational|regional",
-      "culturalContext": "rich cultural background and usage notes",
-      "regionalVariations": "how this varies across regions/cultures",
-      "appropriateUsage": "when and how to use this appropriately"
-    }
-  ],
-  "overallContext": "comprehensive cultural analysis of conversation style and patterns",
-  "culturalIntelligence": {
-    "communicationStyle": "analysis of conversation style (direct/indirect, formal/casual, etc.)",
-    "culturalPatterns": ["detected cultural communication patterns"],
-    "potentialMisunderstandings": ["areas where cultural gaps might cause confusion"]
-  },
-  "proactiveTips": ["specific actionable tips for better cross-cultural communication"],
-  "suggestions": ["helpful tips for understanding this type of conversation"]
+  "culturalContext": "single concise cultural insight about the ORIGINAL message in ${userLanguage} (100-300 characters)"
 }`;
 
-    const userPrompt = `Text to analyze: "${text}"
+    const userPrompt = `ORIGINAL MESSAGE TO ANALYZE: "${text}"
+
+Please:
+1. Analyze the ORIGINAL message "${text}" for cultural elements from ITS source culture
+2. Focus cultural notes on the SOURCE culture's communication patterns, NOT any translation
+3. Respond entirely in ${userLanguage}
+
 User's native language: ${userLanguage}
 ${context.location ? `Location context: ${context.location}` : ''}
-${context.conversationType ? `Conversation type: ${context.conversationType}` : ''}`;
+${context.conversationType ? `Conversation type: ${context.conversationType}` : ''}
+
+Remember: Analyze "${text}" as it exists in its original cultural context, not any translation of it!`;
 
     const client = getOpenAIClient();
     const response = await client.chat.completions.create({
@@ -326,7 +390,7 @@ ${context.conversationType ? `Conversation type: ${context.conversationType}` : 
         { role: 'user', content: userPrompt }
       ],
       temperature: 0.4,
-      max_tokens: 1000,
+      max_tokens: 200,
       response_format: { type: 'json_object' }
     });
 
@@ -681,12 +745,172 @@ Respond naturally and helpfully.`;
   }
 }
 
+/**
+ * Extract structured data from a message (dates, locations, action items)
+ * @param {string} messageText - The message text to analyze
+ * @param {object} context - Additional context (sender, timestamp, etc.)
+ * @returns {Promise<object>} Extracted structured data
+ */
+export async function extractStructuredData(messageText, context = {}) {
+  try {
+    const systemPrompt = `You are an expert at extracting structured data from conversational messages.
+
+Extract the following types of information from messages:
+
+1. DATES & EVENTS: Any mention of dates, times, or events
+   - Birthdays, meetings, appointments, deadlines
+   - Relative dates ("tomorrow", "next week", "in 2 hours")
+   - Specific dates ("May 3rd", "2024-01-15", "Christmas")
+   - Time mentions ("at 2 PM", "9:30 AM", "evening")
+
+2. LOCATIONS: Any mention of places
+   - Specific addresses, landmarks, businesses
+   - Cities, countries, regions  
+   - Meeting places ("Central Park", "the office", "restaurant")
+   - Travel destinations
+
+3. ACTION ITEMS: Tasks, commitments, or things to do
+   - "I need to...", "Don't forget to...", "I'll send you..."
+   - Requests or commitments from the sender
+   - Deadlines or time-sensitive tasks
+
+IMPORTANT:
+- Only extract information that is CLEARLY mentioned in the message
+- Don't make assumptions or infer information not explicitly stated
+- Include the exact text snippet that contains the information
+- Determine if each item needs immediate attention or is just informational
+- Provide a confidence score for each extraction
+
+Response format (JSON):
+{
+  "hasStructuredData": true/false,
+  "extractions": [
+    {
+      "type": "date" | "location" | "action",
+      "category": "event" | "deadline" | "appointment" | "place" | "task" | "commitment",
+      "text": "extracted information in natural language",
+      "sourceSnippet": "exact text from message containing this info",
+      "confidence": 0.95,
+      "urgency": "high" | "medium" | "low",
+      "details": {
+        // For dates: parsedDate, timeSpecified, isRelative
+        // For locations: isSpecific, locationType
+        // For actions: isCommitment, hasDeadline, assignedTo
+      }
+    }
+  ]
+}`;
+
+    const userPrompt = `MESSAGE TO ANALYZE: "${messageText}"
+
+${context.senderName ? `Sent by: ${context.senderName}` : ''}
+${context.timestamp ? `Message timestamp: ${context.timestamp}` : ''}
+${context.chatContext ? `Chat context: ${context.chatContext}` : ''}
+
+Please extract any structured data (dates/events, locations, action items) from this message.`;
+
+    const client = getOpenAIClient();
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.1, // Low temperature for consistent extraction
+      max_tokens: 1000,
+      response_format: { type: "json_object" }
+    });
+
+    const result = JSON.parse(response.choices[0].message.content);
+    
+    return {
+      success: true,
+      hasData: result.hasStructuredData,
+      extractions: result.extractions || [],
+      usage: response.usage
+    };
+
+  } catch (error) {
+    console.error('Structured data extraction error:', error);
+    return {
+      success: false,
+      hasData: false,
+      extractions: [],
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Rewrite text to adjust tone while preserving meaning and language
+ * @param {string} text - Text to rewrite
+ * @param {string} targetTone - Target tone ('casual' or 'formal')
+ * @param {string} language - Language of the text (to preserve)
+ * @returns {Promise<object>} Tone-adjusted text
+ */
+export async function rewriteTone({ text, targetTone, language }) {
+  try {
+    const systemPrompt = `You are a writing assistant that adjusts the tone of text while preserving the exact meaning and language.
+
+CRITICAL INSTRUCTIONS:
+1. ONLY return the rewritten text - NO explanations, NO formatting, NO extra content
+2. Keep the EXACT same language as the input (${language})
+3. Preserve the complete original meaning
+4. Adjust ONLY the tone to be more ${targetTone}
+5. Make the text sound natural for native speakers
+6. Return NOTHING except the rewritten text
+
+TONE GUIDELINES:
+- ${targetTone === 'casual' ? 'Casual: Use relaxed, friendly, conversational language. Remove formalities. Use contractions where appropriate.' : 'Formal: Use professional, polite, respectful language. Avoid slang and contractions. Add appropriate courtesy phrases.'}
+
+EXAMPLE:
+If the input is "Hey, can you send that report?" your response should be exactly:
+${targetTone === 'casual' ? 'Hey, can you send that report?' : 'Could you please send me that report?'}
+
+DO NOT include any labels, prefixes, or explanations. Return ONLY the rewritten text in ${language}.`;
+
+    const userPrompt = text;
+
+    const client = getOpenAIClient();
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.3, // Lower temperature for consistency
+      max_tokens: 500 // Shorter since we only want the rewritten text
+    });
+
+    const rewrittenText = response.choices[0].message.content.trim();
+
+    return {
+      success: true,
+      rewrittenText: rewrittenText,
+      originalText: text,
+      tone: targetTone,
+      language: language,
+      usage: response.usage
+    };
+  } catch (error) {
+    console.error('Tone rewriting error:', error);
+    return {
+      success: false,
+      error: error.message,
+      rewrittenText: text // Fallback to original text
+    };
+  }
+}
+
 export default {
+  fastTranslateText,
   translateText,
   detectLanguage,
   explainCulturalContext,
   generateSmartReplies,
   analyzeConversationCulture,
   processChatMessage,
-  summarizeConversation
+  summarizeConversation,
+  extractStructuredData,
+  rewriteTone
 };

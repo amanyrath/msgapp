@@ -125,7 +125,7 @@ export default function AITranslationMessage({
     if (loading) {
       return (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color={isFromCurrentUser ? "#fff" : "#007AFF"} />
+          <ActivityIndicator size="small" color={isFromCurrentUser ? "#fff" : "#CD853F"} />
           <Text style={[styles.loadingText, { color: isFromCurrentUser ? "#fff" : "#333" }]}>
             {t('translating')}...
           </Text>
@@ -148,7 +148,7 @@ export default function AITranslationMessage({
         {/* AI Indicator and Translation */}
         <View style={styles.translationSection}>
           <View style={styles.aiHeader}>
-            <Text style={[styles.aiIndicator, { color: isFromCurrentUser ? "rgba(255,255,255,0.8)" : "#007AFF" }]}>
+            <Text style={[styles.aiIndicator, { color: isFromCurrentUser ? "rgba(255,255,255,0.8)" : "#CD853F" }]}>
               🤖 {t('translation')}
             </Text>
             {translationData.confidence && (
@@ -174,7 +174,7 @@ export default function AITranslationMessage({
               activeOpacity={0.7}
             >
               <Text style={[styles.contextButtonText, { 
-                color: isFromCurrentUser ? "#fff" : "#007AFF" 
+                color: isFromCurrentUser ? "#fff" : "#CD853F" 
               }]}>
                 {showFullContext ? t('hideCulturalContext') || 'Hide cultural context' : t('seeCulturalContext') || 'See cultural context'}
               </Text>
@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   myMessageBubble: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     borderBottomRightRadius: 4,
   },
   theirMessageBubble: {

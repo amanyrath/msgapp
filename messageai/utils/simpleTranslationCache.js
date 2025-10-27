@@ -134,19 +134,15 @@ export async function getTranslationWithCache(messageId, messageText, targetLang
       return cached;
     }
 
-    // Generate new translation
-    console.log('🌐 Cache miss, generating new translation');
+    // Generate new FAST translation
+    console.log('⚡ Cache miss, generating new FAST translation');
     
-    const { translateText } = await import('./aiService');
-    const result = await translateText({
+    const { fastTranslateText } = await import('./aiService');
+    const result = await fastTranslateText({
       text: messageText,
       targetLanguage,
       sourceLanguage,
-      formality: 'casual',
-      culturalContext: {
-        chatContext: 'Enhanced inline translation',
-        responseLanguage: targetLanguage
-      }
+      formality: 'casual'
     });
 
     // Cache successful translations

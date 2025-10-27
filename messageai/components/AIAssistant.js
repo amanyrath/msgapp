@@ -12,12 +12,19 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  TouchableWithoutFeedback
+  TouchableWithoutFeedback,
+  Modal
 } from 'react-native';
 import { processChatMessage, translateText, summarizeConversation } from '../utils/aiService';
-import { buildAIContext, filterMessagesByTimeRange } from '../utils/aiContext';
-import { sendTranslationMessage, processBulkTranslation } from '../utils/aiFirestore';
+import { buildAIContext } from '../utils/aiContext';
 import { useLocalization } from '../context/LocalizationContext';
+import { subscribeToConversationInsights } from '../utils/firestore';
+import { 
+  loadAIConversation, 
+  saveAIConversation, 
+  addMessageToAIConversation,
+  cleanupOldAIConversations 
+} from '../utils/aiConversationStorage';
 
 /**
  * AIAssistant - Modal interface for AI interactions
@@ -30,46 +37,151 @@ export default function AIAssistant({
   messages = [],
   userProfiles = [],
   currentUser,
-  onAutoTranslateChange // New prop to communicate auto-translate state back to parent
+  autoTranslateSettings = { enabled: false, targetLanguage: 'English', formality: 'casual' },
+  onNavigateToMessage // New prop to handle navigation to source message from insights
 }) {
   const { languageName: userLanguage, t } = useLocalization();
   const [aiMessages, setAiMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const flatListRef = useRef(null);
   
   // Auto-translation state
-  const [autoTranslateEnabled, setAutoTranslateEnabled] = useState(false);
-  const [autoTranslateLanguage, setAutoTranslateLanguage] = useState('English');
-  const [autoTranslateFormality, setAutoTranslateFormality] = useState('casual');
+  const [autoTranslateEnabled, setAutoTranslateEnabled] = useState(autoTranslateSettings.enabled);
+  const [autoTranslateLanguage, setAutoTranslateLanguage] = useState(autoTranslateSettings.targetLanguage);
+  const [autoTranslateFormality, setAutoTranslateFormality] = useState(autoTranslateSettings.formality);
+  
+  // Language dropdown state
+  const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
   
   // Dropdown state
   const [showDropdown, setShowDropdown] = useState(false);
 
-  // Initialize AI conversation with context - only when modal becomes visible
-  useEffect(() => {
-    if (visible && messages.length > 0) {
-      initializeAIContext();
-    }
-  }, [visible]); // Removed messages dependency to prevent re-initialization on every message
+  // Tab state
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'insights'
+  
+  // Conversation insights state
+  const [insights, setInsights] = useState([]);
+  const [insightsLoading, setInsightsLoading] = useState(false);
 
-  // Notify parent when auto-translate settings change
+  // Load AI conversation history when modal becomes visible
   useEffect(() => {
-    if (onAutoTranslateChange) {
-      onAutoTranslateChange({
-        enabled: autoTranslateEnabled,
-        targetLanguage: autoTranslateLanguage,
-        formality: autoTranslateFormality
-      });
+    if (visible && currentUser?.uid) {
+      loadConversationHistory();
     }
-  }, [autoTranslateEnabled, autoTranslateLanguage, autoTranslateFormality, onAutoTranslateChange]);
+  }, [visible, chatId, currentUser?.uid]);
 
-  // Close dropdown when modal closes
+  // Save conversation and cleanup when modal closes
   useEffect(() => {
     if (!visible) {
+      // Save current conversation before closing
+      if (aiMessages.length > 0 && currentUser?.uid) {
+        saveConversationHistory();
+      }
+      
       setShowDropdown(false);
+      setActiveTab('chat');
+      setInsights([]);
+      
+      // Run cleanup periodically (only when closing modal to avoid performance impact)
+      if (currentUser?.uid) {
+        cleanupOldAIConversations(currentUser.uid).catch(error => {
+          console.warn('⚠️ Cleanup error:', error);
+        });
+      }
     }
-  }, [visible]);
+  }, [visible, aiMessages, currentUser?.uid, chatId]);
+
+  // Subscribe to conversation insights when modal is visible
+  useEffect(() => {
+    if (!visible || !chatId) return;
+
+    setInsightsLoading(true);
+    
+    // Process existing messages for insights if this is the first time opening
+    const processBulkMessagesForInsights = async () => {
+      if (messages.length > 0 && userProfiles.length > 0 && currentUser?.uid) {
+        console.log('📊 Checking for bulk insights processing on', messages.length, 'messages');
+        
+        // Import the bulk processor
+        const { processBulkMessages } = await import('../utils/insightsProcessor');
+        
+        // Process up to 15 most recent messages from other users
+        await processBulkMessages(messages, chatId, currentUser.uid, userProfiles, 15);
+      }
+    };
+
+    // Start bulk processing (non-blocking)
+    processBulkMessagesForInsights().catch(error => {
+      console.error('❌ Error in bulk insights processing:', error);
+    });
+
+    const unsubscribe = subscribeToConversationInsights(
+      chatId,
+      (insightsData) => {
+        // Sort insights chronologically (most recent first)
+        const sortedInsights = insightsData.sort((a, b) => 
+          new Date(b.createdAt) - new Date(a.createdAt)
+        );
+        console.log('📊 Insights subscription updated:', sortedInsights.length, 'total insights');
+        setInsights(sortedInsights);
+        setInsightsLoading(false);
+      }
+    );
+
+    return unsubscribe;
+  }, [visible, chatId, messages.length, userProfiles.length, currentUser?.uid]);
+
+  // Load conversation history from persistent storage
+  const loadConversationHistory = useCallback(async () => {
+    if (!chatId || !currentUser?.uid) return;
+    
+    setLoadingHistory(true);
+    try {
+      const savedMessages = await loadAIConversation(chatId, currentUser.uid);
+      
+      if (savedMessages && savedMessages.length > 0) {
+        console.log('📱 Loaded AI conversation history:', savedMessages.length, 'messages');
+        setAiMessages(savedMessages);
+      } else {
+        // No existing history, initialize with welcome message
+        initializeAIContext();
+      }
+    } catch (error) {
+      console.error('❌ Error loading AI conversation history:', error);
+      // Fallback to fresh initialization
+      initializeAIContext();
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [chatId, currentUser?.uid]);
+
+  // Save conversation history to persistent storage
+  const saveConversationHistory = useCallback(async () => {
+    if (!chatId || !currentUser?.uid || aiMessages.length === 0) return;
+    
+    try {
+      const success = await saveAIConversation(chatId, currentUser.uid, aiMessages);
+      if (success) {
+        console.log('📱 Saved AI conversation history:', aiMessages.length, 'messages');
+      }
+    } catch (error) {
+      console.error('❌ Error saving AI conversation history:', error);
+    }
+  }, [chatId, currentUser?.uid, aiMessages]);
+
+  // Save conversation history whenever messages change (debounced)
+  useEffect(() => {
+    if (aiMessages.length > 0 && currentUser?.uid && visible) {
+      // Debounce saving to avoid too frequent writes
+      const timeoutId = setTimeout(() => {
+        saveConversationHistory();
+      }, 2000); // Save 2 seconds after last message
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [aiMessages, currentUser?.uid, visible, saveConversationHistory]);
 
   const initializeAIContext = useCallback(async () => {
     // Create welcome message with context-aware suggestions
@@ -77,11 +189,11 @@ export default function AIAssistant({
     
     const welcomeMessage = {
       id: `ai-welcome-${Date.now()}`,
-      text: `Hi! I'm your AI assistant for international communication. I can help you with:
+      text: `${t('assistantWelcome') || "Hi! I'm your AI assistant for international communication. I can help you with:"}
 
 ${contextualSuggestions.map(s => `• ${s}`).join('\n')}
 
-What would you like me to help you with?`,
+${t('assistantPrompt') || 'What would you like me to help you with?'}`,
       sender: 'ai',
       timestamp: new Date()
     };
@@ -91,22 +203,22 @@ What would you like me to help you with?`,
 
   const getContextualSuggestions = useCallback(() => {
     const suggestions = [
-      'Translate messages (last hour, day, or starting now)',
-      'Summarize chat history (last week, month, or all messages)',
-      'Explain cultural context and slang',
-      'Suggest appropriate responses',
-      'Analyze conversation patterns'
+      t('summarizeChatHistory') || 'Summarize chat history (last week, month, or all messages)',
+      t('explainCulturalContext') || 'Explain cultural context and slang',
+      t('suggestResponses') || 'Suggest appropriate responses',
+      t('analyzePatterns') || 'Analyze conversation patterns',
+      t('generateSmartReplies') || 'Generate smart reply suggestions'
     ];
 
     // Add context-specific suggestions based on recent messages
     const recentText = messages.slice(-5).map(m => m.text).join(' ').toLowerCase();
     
     if (recentText.includes('rave') || recentText.includes('dj') || recentText.includes('music')) {
-      suggestions.push('Explain music/rave terminology');
+      suggestions.push(t('explainMusicTerminology') || 'Explain music/rave terminology');
     }
     
     if (recentText.match(/[¿¡ñáéíóúü]/)) {
-      suggestions.push('Help with Spanish communication');
+      suggestions.push(t('helpSpanishCommunication') || 'Help with Spanish communication');
     }
 
     return suggestions.slice(0, 5); // Limit to 5 suggestions
@@ -164,7 +276,7 @@ What would you like me to help you with?`,
       console.error('AI Assistant error:', error);
       const errorMessage = {
         id: `ai-error-${Date.now()}`,
-        text: 'Sorry, I encountered an error. Please try again.',
+        text: t('errorTryAgain') || 'Sorry, I encountered an error. Please try again.',
         sender: 'ai',
         timestamp: new Date(),
         isError: true
@@ -193,29 +305,7 @@ What would you like me to help you with?`,
         // AI should ask for timeframe clarification
         const clarificationMessage = {
           id: `ai-summary-clarify-${Date.now()}`,
-          text: 'I can summarize the chat history for you! How long back would you like me to summarize?\n\n• The last week\n• The last month\n• Today only\n• All messages\n\nPlease let me know your preference.',
-          sender: 'ai',
-          timestamp: new Date()
-        };
-        setAiMessages(prev => [...prev, clarificationMessage]);
-      }
-      return; // Exit early to avoid translation check
-    }
-    
-    // Check if user is asking for translation
-    if (lowerText.includes('translate')) {
-      // Check for specific timeframes
-      if (lowerText.includes('hour ago') || lowerText.includes('last hour')) {
-        await handleTranslationRequest('hour');
-      } else if (lowerText.includes('day ago') || lowerText.includes('last day') || lowerText.includes('24')) {
-        await handleTranslationRequest('day');
-      } else if (lowerText.includes('starting now') || lowerText.includes('from now')) {
-        await handleTranslationRequest('now');
-      } else {
-        // AI should ask for timeframe clarification
-        const clarificationMessage = {
-          id: `ai-clarify-${Date.now()}`,
-          text: 'I can translate messages for you! Please specify the timeframe:\n\n• Last hour\n• Last 24 hours\n• Starting from now\n\nWhich would you like?',
+          text: t('summarizeHowFarBack') || 'I can summarize the chat history for you! How long back would you like me to summarize?\n\n• The last week\n• The last month\n• Today only\n• All messages\n\nPlease let me know your preference.',
           sender: 'ai',
           timestamp: new Date()
         };
@@ -224,82 +314,6 @@ What would you like me to help you with?`,
     }
   };
 
-  const handleTranslationRequest = async (timeRange) => {
-    try {
-      setLoading(true);
-      
-      // Filter messages by time range
-      const messagesToTranslate = filterMessagesByTimeRange(messages, timeRange);
-      
-      if (messagesToTranslate.length === 0) {
-        const noMessagesResponse = {
-          id: `ai-no-messages-${Date.now()}`,
-          text: t('noMessagesFoundTimeframe', { timeRange }) || `No messages found in the specified timeframe (${timeRange}).`,
-          sender: 'ai',
-          timestamp: new Date()
-        };
-        setAiMessages(prev => [...prev, noMessagesResponse]);
-        return;
-      }
-
-      // Start bulk translation
-      const startMessage = {
-        id: `ai-translation-start-${Date.now()}`,
-        text: `Starting translation of ${messagesToTranslate.length} messages from ${timeRange}. This may take a moment...`,
-        sender: 'ai',
-        timestamp: new Date()
-      };
-      setAiMessages(prev => [...prev, startMessage]);
-
-      // Process translations in the background
-      const results = await processBulkTranslation(
-        chatId,
-        messagesToTranslate,
-        'English', // Default target language - could be made configurable
-        'casual',
-        currentUser,
-        (progress, total) => {
-          // Update progress in real-time
-          const progressMessage = {
-            id: `ai-progress-${Date.now()}`,
-            text: `Translating... ${progress}/${total} messages processed.`,
-            sender: 'ai',
-            timestamp: new Date()
-          };
-          setAiMessages(prev => {
-            const filtered = prev.filter(m => !m.id.startsWith('ai-progress-'));
-            return [...filtered, progressMessage];
-          });
-        }
-      );
-
-      const successCount = results.filter(r => r.success).length;
-      const completionMessage = {
-        id: `ai-translation-complete-${Date.now()}`,
-        text: `Translation complete! Successfully translated ${successCount} out of ${messagesToTranslate.length} messages. Check your chat for the translations.`,
-        sender: 'ai',
-        timestamp: new Date()
-      };
-      
-      setAiMessages(prev => {
-        const filtered = prev.filter(m => !m.id.startsWith('ai-progress-'));
-        return [...filtered, completionMessage];
-      });
-      
-    } catch (error) {
-      console.error('Translation request error:', error);
-      const errorMessage = {
-        id: `ai-translation-error-${Date.now()}`,
-        text: 'Sorry, I encountered an error while processing the translation. Please try again.',
-        sender: 'ai',
-        timestamp: new Date(),
-        isError: true
-      };
-      setAiMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSummaryRequest = async (timeRange) => {
     try {
@@ -401,7 +415,7 @@ What would you like me to help you with?`,
       } else {
         const errorMessage = {
           id: `ai-summary-error-${Date.now()}`,
-          text: `Sorry, I encountered an error while generating the summary: ${result.error}. Please try again.`,
+          text: `${t('errorGeneratingSummary') || 'Sorry, I encountered an error while generating the summary:'} ${result.error}. ${t('pleaseRetry') || 'Please try again.'}`,
           sender: 'ai',
           timestamp: new Date(),
           isError: true
@@ -416,7 +430,7 @@ What would you like me to help you with?`,
       console.error('Summary request error:', error);
       const errorMessage = {
         id: `ai-summary-error-${Date.now()}`,
-        text: 'Sorry, I encountered an error while processing the summary. Please try again.',
+        text: t('errorProcessingSummary') || 'Sorry, I encountered an error while processing the summary. Please try again.',
         sender: 'ai',
         timestamp: new Date(),
         isError: true
@@ -438,7 +452,7 @@ What would you like me to help you with?`,
       if (recentMessages.length === 0) {
         const noMessagesResponse = {
           id: `ai-no-messages-${Date.now()}`,
-          text: 'No recent messages to adjust for formality.',
+          text: t('noRecentMessagesFormality') || 'No recent messages to adjust for formality.',
           sender: 'ai',
           timestamp: new Date()
         };
@@ -490,7 +504,7 @@ What would you like me to help you with?`,
       console.error('Formality adjustment error:', error);
       const errorMessage = {
         id: `ai-formality-error-${Date.now()}`,
-        text: 'Sorry, I encountered an error adjusting formality. Please try again.',
+        text: t('errorAdjustingFormality') || 'Sorry, I encountered an error adjusting formality. Please try again.',
         sender: 'ai',
         timestamp: new Date(),
         isError: true
@@ -509,7 +523,7 @@ What would you like me to help you with?`,
       if (recentMessages.length === 0) {
         const noMessagesResponse = {
           id: `ai-no-cultural-${Date.now()}`,
-          text: 'No recent messages to analyze for cultural context.',
+          text: t('noRecentMessagesCultural') || 'No recent messages to analyze for cultural context.',
           sender: 'ai',
           timestamp: new Date()
         };
@@ -605,7 +619,7 @@ What would you like me to help you with?`,
       console.error('Cultural explanation error:', error);
       const errorMessage = {
         id: `ai-cultural-error-${Date.now()}`,
-        text: 'Sorry, I encountered an error analyzing cultural context. Please try again.',
+        text: t('errorAnalyzingCulture') || 'Sorry, I encountered an error analyzing cultural context. Please try again.',
         sender: 'ai',
         timestamp: new Date(),
         isError: true
@@ -620,38 +634,29 @@ What would you like me to help you with?`,
     let message = '';
     
     switch (action) {
-      case 'translate_hour':
-        message = 'Please translate messages from the last hour';
-        break;
-      case 'translate_day':
-        message = 'Please translate messages from the last day';
-        break;
-      case 'translate_now':
-        message = 'Please translate messages starting now';
-        break;
       case 'summarize_week':
-        message = 'Please summarize the chat history from the last week';
+        message = t('summarizeWeekRequest') || 'Please summarize the chat history from the last week';
         break;
       case 'summarize_day':
-        message = 'Please summarize today\'s chat history';
+        message = t('summarizeTodayRequest') || 'Please summarize today\'s chat history';
         break;
       case 'summarize_all':
-        message = 'Please summarize all our chat history';
+        message = t('summarizeAllRequest') || 'Please summarize all our chat history';
         break;
       case 'explain_context':
-        message = 'Can you explain any cultural context or slang in recent messages?';
+        message = t('explainCulturalContextRequest') || 'Can you explain any cultural context or slang in recent messages?';
         break;
       case 'suggest_replies':
         await handleSmartReplies();
         return;
       case 'formality_casual':
-        message = 'Please adjust the tone of recent messages to be more casual';
+        message = t('adjustToneCasualRequest') || 'Please adjust the tone of recent messages to be more casual';
         break;
       case 'formality_formal':
-        message = 'Please adjust the tone of recent messages to be more formal';
+        message = t('adjustToneFormalRequest') || 'Please adjust the tone of recent messages to be more formal';
         break;
       case 'cultural_tips':
-        message = 'Can you give me cultural tips for better communication in this conversation?';
+        message = t('culturalTipsRequest') || 'Can you give me cultural tips for better communication in this conversation?';
         break;
       case 'rubric_demo':
         await handleRubricDemo();
@@ -671,7 +676,7 @@ What would you like me to help you with?`,
       if (recentMessages.length === 0) {
         const noMessagesResponse = {
           id: `ai-no-replies-${Date.now()}`,
-          text: 'No recent messages to generate replies for.',
+          text: t('noRecentMessagesReplies') || 'No recent messages to generate replies for.',
           sender: 'ai',
           timestamp: new Date()
         };
@@ -736,7 +741,7 @@ What would you like me to help you with?`,
       console.error('Smart replies error:', error);
       const errorMessage = {
         id: `ai-smart-replies-error-${Date.now()}`,
-        text: 'Sorry, I encountered an error generating smart replies. Please try again.',
+        text: t('errorGeneratingReplies') || 'Sorry, I encountered an error generating smart replies. Please try again.',
         sender: 'ai',
         timestamp: new Date(),
         isError: true
@@ -783,40 +788,41 @@ What would you like me to help you with?`,
       
       const demoMessage = {
         id: `ai-rubric-demo-${Date.now()}`,
-        text: `🎯 **International Communicator - Rubric Demonstration**
+        text: `🎯 **International Communicator - AI Analysis Features**
 
-This AI assistant demonstrates all 5 required capabilities:
+This AI assistant provides advanced conversation analysis:
 
-✅ **1. Real-time Translation (Accurate & Natural)**
-• Sub-2 second response times with GPT-4o mini
-• Automatic language detection with confidence scoring
-• Natural phrasing with cultural appropriateness
-• Quality metrics: Accuracy, Naturalness, Cultural Awareness
-
-✅ **2. Automatic Language Detection** 
-• Seamless detection integrated into translation pipeline
-• Confidence scoring and dialect recognition
-• Works across 100+ languages with high accuracy
-
-✅ **3. Cultural Context Hints (Actually Helpful)**
+✅ **1. Cultural Context Analysis (Deep Insights)**
 • Proactive analysis of slang, idioms, and cultural references
 • Regional variations and appropriate usage guidance  
 • Cultural intelligence analysis of communication patterns
 • Context-specific explanations (music, professional, regional)
 
-✅ **4. Formality Adjustment (Appropriate Tone)**
+✅ **2. Formality Adjustment (Tone Optimization)**
 • Casual ↔ Formal tone conversion with cultural sensitivity
 • Regional cultural considerations (hierarchical vs. egalitarian)
 • Direct vs. indirect communication style adaptation
 • Before/after comparisons with detailed explanations
 
-✅ **5. Slang/Idiom Explanations (Crystal Clear)**
+✅ **3. Slang/Idiom Explanations (Crystal Clear)**
 • Enhanced visual displays with rich cultural background
 • Categorized explanations: slang|idiom|cultural_reference|generational
 • Regional variations and appropriate usage contexts
 • Proactive communication improvement suggestions
 
-🚀 **Advanced AI Capability**: Context-aware smart replies with cultural intelligence, conversation analysis, and cross-cultural communication optimization.
+✅ **4. Smart Reply Generation (Context-Aware)**
+• Culturally appropriate response suggestions
+• Conversation style analysis and tone matching
+• Multiple options with cultural explanations
+
+✅ **5. Conversation Summarization (Intelligent Overview)**
+• Comprehensive chat history analysis
+• Key topics, cultural highlights, and action items
+• Timeframe-specific summaries (week, month, all messages)
+
+🚀 **Advanced AI Capability**: Cross-cultural communication optimization with conversation analysis and cultural intelligence.
+
+*Note: Real-time translation is handled by the app's dedicated localization system.*
 
 Try any feature using the buttons above or natural language commands!`,
         sender: 'ai',
@@ -861,6 +867,137 @@ Try any feature using the buttons above or natural language commands!`,
     scrollToBottom();
   }, [aiMessages]);
 
+  // Handle navigation to source message from insight
+  const handleInsightNavigation = (messageId) => {
+    // Close the AI Assistant modal
+    onClose();
+    
+    // Navigate to the source message (this will be handled by parent component)
+    if (onNavigateToMessage) {
+      onNavigateToMessage(messageId);
+    }
+  };
+
+  // Format insight text for display
+  const formatInsightText = (extraction) => {
+    const typeEmoji = {
+      'date': '📅',
+      'location': '📍', 
+      'action': '✅'
+    };
+    
+    const urgencyColor = {
+      'high': '#FF4444',
+      'medium': '#FF9500',
+      'low': '#34C759'
+    };
+    
+    return {
+      emoji: typeEmoji[extraction.type] || '💡',
+      text: extraction.text,
+      urgency: extraction.urgency,
+      urgencyColor: urgencyColor[extraction.urgency] || '#666',
+      sourceSnippet: extraction.sourceSnippet
+    };
+  };
+
+  // Render insights content
+  const renderInsightsContent = () => {
+    if (insightsLoading) {
+      return (
+        <View style={styles.insightsContainer}>
+          <ActivityIndicator size="large" color="#CD853F" />
+          <Text style={styles.loadingText}>{t('loadingInsights') || 'Loading insights...'}</Text>
+        </View>
+      );
+    }
+
+    if (insights.length === 0) {
+      return (
+        <View style={styles.emptyInsightsContainer}>
+          <Text style={styles.emptyInsightsIcon}>🔍</Text>
+          <Text style={styles.emptyInsightsTitle}>{t('noInsightsYet') || 'No Insights Yet'}</Text>
+          <Text style={styles.emptyInsightsText}>
+            {t('insightsExplanation') || 'As your conversation grows, I\'ll automatically extract dates, locations, and action items to help you stay organized.'}
+          </Text>
+          
+          {/* Test button for development */}
+          {__DEV__ && (
+            <TouchableOpacity
+              style={styles.testButton}
+              onPress={async () => {
+                console.log('🧪 Testing structured data extraction...');
+                const { extractStructuredData } = await import('../utils/aiService');
+                const testMessage = "Let's meet tomorrow at 2 PM at Central Park for the birthday party. Don't forget to bring the cake!";
+                
+                const result = await extractStructuredData(testMessage, {
+                  senderName: 'Test User',
+                  timestamp: new Date(),
+                  chatId: chatId
+                });
+                
+                console.log('🧪 Test result:', result);
+                Alert.alert(t('testResult') || 'Test Result', JSON.stringify(result, null, 2));
+              }}
+            >
+              <Text style={styles.testButtonText}>🧪 {t('testAIExtraction') || 'Test AI Extraction'}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      );
+    }
+
+    // Flatten all extractions from all insights with metadata
+    const allExtractions = [];
+    insights.forEach(insight => {
+      insight.extractions?.forEach(extraction => {
+        allExtractions.push({
+          ...extraction,
+          messageId: insight.messageId,
+          senderName: insight.senderName,
+          messageTimestamp: insight.messageTimestamp,
+          insightId: insight.id
+        });
+      });
+    });
+
+    return (
+      <FlatList
+        data={allExtractions}
+        keyExtractor={(item, index) => `${item.insightId}-${index}`}
+        style={styles.insightsList}
+        contentContainerStyle={styles.insightsContent}
+        renderItem={({ item }) => {
+          const formatted = formatInsightText(item);
+          return (
+            <TouchableOpacity
+              style={styles.insightItem}
+              onPress={() => handleInsightNavigation(item.messageId)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.insightHeader}>
+                <Text style={styles.insightEmoji}>{formatted.emoji}</Text>
+                <View style={styles.insightHeaderText}>
+                  <Text style={styles.insightText}>{formatted.text}</Text>
+                  <Text style={styles.insightMeta}>
+                    {item.senderName} • {new Date(item.messageTimestamp).toLocaleDateString()}
+                  </Text>
+                </View>
+                <View style={[styles.urgencyBadge, { backgroundColor: formatted.urgencyColor }]}>
+                  <Text style={styles.urgencyText}>{t(item.urgency) || item.urgency}</Text>
+                </View>
+              </View>
+              {formatted.sourceSnippet && (
+                <Text style={styles.sourceSnippet}>"{formatted.sourceSnippet}"</Text>
+              )}
+            </TouchableOpacity>
+          );
+        }}
+        ItemSeparatorComponent={() => <View style={styles.insightSeparator} />}
+      />
+    );
+  };
+
   if (!visible) return null;
 
   return (
@@ -872,7 +1009,34 @@ Try any feature using the buttons above or natural language commands!`,
         </TouchableOpacity>
       </View>
 
-      {/* Quick Actions Dropdown */}
+      {/* Tab Bar */}
+      <View style={styles.tabBar}>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'chat' && styles.activeTab]}
+          onPress={() => setActiveTab('chat')}
+        >
+          <Text style={[styles.tabText, activeTab === 'chat' && styles.activeTabText]}>
+            💬 {t('chat') || 'Chat'}
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'insights' && styles.activeTab]}
+          onPress={() => setActiveTab('insights')}
+        >
+          <Text style={[styles.tabText, activeTab === 'insights' && styles.activeTabText]}>
+            📊 {t('insights') || 'Insights'}
+          </Text>
+          {insights.length > 0 && (
+            <View style={styles.insightsBadge}>
+              <Text style={styles.insightsBadgeText}>{insights.reduce((count, insight) => count + (insight.extractions?.length || 0), 0)}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Quick Actions Dropdown - only show on chat tab */}
+      {activeTab === 'chat' && (
       <View style={styles.quickActionsContainer}>
         <TouchableOpacity 
           style={styles.dropdownButton}
@@ -884,32 +1048,6 @@ Try any feature using the buttons above or natural language commands!`,
         
         {showDropdown && (
           <View style={styles.dropdownMenu}>
-            <TouchableOpacity 
-              style={styles.dropdownItem}
-              activeOpacity={0.7}
-              onPress={() => {
-                handleQuickAction('translate_hour');
-                setShowDropdown(false);
-              }}
-            >
-              <Text style={styles.dropdownItemIcon}>🕐</Text>
-              <Text style={styles.dropdownItemText}>{t('translate1h') || 'Translate Last Hour'}</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.dropdownItem}
-              activeOpacity={0.7}
-              onPress={() => {
-                handleQuickAction('translate_day');
-                setShowDropdown(false);
-              }}
-            >
-              <Text style={styles.dropdownItemIcon}>📅</Text>
-              <Text style={styles.dropdownItemText}>{t('translate24h') || 'Translate Last 24h'}</Text>
-            </TouchableOpacity>
-            
-            <View style={styles.dropdownSeparator} />
-            
             <TouchableOpacity 
               style={styles.dropdownItem}
               activeOpacity={0.7}
@@ -945,7 +1083,7 @@ Try any feature using the buttons above or natural language commands!`,
               }}
             >
               <Text style={styles.dropdownItemIcon}>🌍</Text>
-              <Text style={styles.dropdownItemText}>{t('explain') || 'Explain Culture'}</Text>
+              <Text style={styles.dropdownItemText}>{t('explainCulture') || 'Explain Culture'}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity 
@@ -957,7 +1095,7 @@ Try any feature using the buttons above or natural language commands!`,
               }}
             >
               <Text style={styles.dropdownItemIcon}>💡</Text>
-              <Text style={styles.dropdownItemText}>{t('suggest') || 'Smart Replies'}</Text>
+              <Text style={styles.dropdownItemText}>{t('smartReplies') || 'Smart Replies'}</Text>
             </TouchableOpacity>
             
             <View style={styles.dropdownSeparator} />
@@ -971,7 +1109,7 @@ Try any feature using the buttons above or natural language commands!`,
               }}
             >
               <Text style={styles.dropdownItemIcon}>😊</Text>
-              <Text style={styles.dropdownItemText}>{t('casual') || 'Make Casual'}</Text>
+              <Text style={styles.dropdownItemText}>{t('makeCasual') || 'Make Casual'}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity 
@@ -983,7 +1121,7 @@ Try any feature using the buttons above or natural language commands!`,
               }}
             >
               <Text style={styles.dropdownItemIcon}>🎩</Text>
-              <Text style={styles.dropdownItemText}>{t('formal') || 'Make Formal'}</Text>
+              <Text style={styles.dropdownItemText}>{t('makeFormal') || 'Make Formal'}</Text>
             </TouchableOpacity>
             
             <View style={styles.dropdownSeparator} />
@@ -997,7 +1135,7 @@ Try any feature using the buttons above or natural language commands!`,
               }}
             >
               <Text style={styles.dropdownItemIcon}>🌟</Text>
-              <Text style={styles.dropdownItemText}>{t('tips') || 'Cultural Tips'}</Text>
+              <Text style={styles.dropdownItemText}>{t('culturalTips') || 'Cultural Tips'}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity 
@@ -1013,7 +1151,6 @@ Try any feature using the buttons above or natural language commands!`,
             </TouchableOpacity>
           </View>
         )}
-      </View>
 
       {/* Auto-Translation Toggle Section */}
       <View style={styles.autoTranslateSection}>
@@ -1024,7 +1161,11 @@ Try any feature using the buttons above or natural language commands!`,
               styles.toggleButton, 
               autoTranslateEnabled && styles.toggleButtonActive
             ]}
-            onPress={() => setAutoTranslateEnabled(!autoTranslateEnabled)}
+              onPress={() => {
+                const newEnabled = !autoTranslateEnabled;
+                setAutoTranslateEnabled(newEnabled);
+                console.log('🔄 Auto translate toggle changed:', newEnabled);
+              }}
           >
             <Text style={[
               styles.toggleButtonText,
@@ -1039,25 +1180,13 @@ Try any feature using the buttons above or natural language commands!`,
           <View style={styles.translationSettings}>
             <View style={styles.settingRow}>
               <Text style={styles.settingLabel}>{t('language')}:</Text>
-              <View style={styles.languageSelector}>
-                {['English', 'Spanish', 'French', 'German', 'Italian'].map(lang => (
-                  <TouchableOpacity
-                    key={lang}
-                    style={[
-                      styles.languageOption,
-                      autoTranslateLanguage === lang && styles.languageOptionActive
-                    ]}
-                    onPress={() => setAutoTranslateLanguage(lang)}
-                  >
-                    <Text style={[
-                      styles.languageOptionText,
-                      autoTranslateLanguage === lang && styles.languageOptionTextActive
-                    ]}>
-                      {lang.substring(0, 2).toUpperCase()}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <TouchableOpacity 
+                style={styles.languageDropdownButton}
+                onPress={() => setShowLanguageDropdown(!showLanguageDropdown)}
+              >
+                <Text style={styles.languageDropdownText}>{autoTranslateLanguage}</Text>
+                <Text style={styles.languageDropdownArrow}>{showLanguageDropdown ? '▲' : '▼'}</Text>
+              </TouchableOpacity>
             </View>
             
             <View style={styles.settingRow}>
@@ -1073,7 +1202,10 @@ Try any feature using the buttons above or natural language commands!`,
                       styles.formalityOption,
                       autoTranslateFormality === option.key && styles.formalityOptionActive
                     ]}
-                    onPress={() => setAutoTranslateFormality(option.key)}
+                      onPress={() => {
+                        setAutoTranslateFormality(option.key);
+                        console.log('🔄 Auto translate formality changed:', option.key);
+                      }}
                   >
                     <Text style={[
                       styles.formalityOptionText,
@@ -1092,12 +1224,66 @@ Try any feature using the buttons above or natural language commands!`,
           </View>
         )}
       </View>
+      </View>
+      )}
+
+      {/* Language Dropdown Modal */}
+      <Modal
+        transparent={true}
+        visible={showLanguageDropdown}
+        animationType="fade"
+        onRequestClose={() => setShowLanguageDropdown(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowLanguageDropdown(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.languageDropdownModal}>
+              <Text style={styles.languageDropdownTitle}>{t('selectLanguage') || 'Select Language'}</Text>
+              {['English', 'Spanish', 'French', 'German', 'Italian'].map(lang => (
+                <TouchableOpacity
+                  key={lang}
+                  style={[
+                    styles.languageDropdownOption,
+                    autoTranslateLanguage === lang && styles.languageDropdownOptionActive
+                  ]}
+                  onPress={() => {
+                    setAutoTranslateLanguage(lang);
+                    setShowLanguageDropdown(false);
+                    console.log('🔄 Auto translate language changed:', lang);
+                  }}
+                >
+                  <Text style={[
+                    styles.languageDropdownOptionText,
+                    autoTranslateLanguage === lang && styles.languageDropdownOptionTextActive
+                  ]}>
+                    {lang}
+                  </Text>
+                  {autoTranslateLanguage === lang && (
+                    <Text style={styles.languageDropdownCheck}>✓</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       <TouchableWithoutFeedback onPress={() => setShowDropdown(false)}>
+        <View style={styles.content}>
+          {activeTab === 'chat' ? (
         <KeyboardAvoidingView 
-          style={styles.content}
+              style={styles.chatContent}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
+              {/* Show loading indicator when loading history */}
+              {loadingHistory && (
+                <View style={styles.loadingHistoryContainer}>
+                  <ActivityIndicator size="small" color="#CD853F" />
+                  <Text style={styles.loadingHistoryText}>
+                    {t('loadingConversation') || 'Loading conversation...'}
+                  </Text>
+                </View>
+              )}
+
           <FlatList
             ref={flatListRef}
             data={aiMessages}
@@ -1133,6 +1319,10 @@ Try any feature using the buttons above or natural language commands!`,
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+          ) : (
+            renderInsightsContent()
+          )}
+        </View>
       </TouchableWithoutFeedback>
 
     </SafeAreaView>
@@ -1164,7 +1354,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   closeButtonText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 16,
     fontWeight: '500',
   },
@@ -1238,7 +1428,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 122, 255, 0.05)',
   },
   demoItemText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontWeight: '600',
   },
   // Auto-translation styles
@@ -1293,29 +1483,76 @@ const styles = StyleSheet.create({
     marginRight: 12,
     minWidth: 80,
   },
-  languageSelector: {
+  languageDropdownButton: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     flex: 1,
   },
-  languageOption: {
-    backgroundColor: '#e0e0e0',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    marginRight: 8,
-    minWidth: 40,
-    alignItems: 'center',
+  languageDropdownText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
   },
-  languageOptionActive: {
-    backgroundColor: '#007AFF',
-  },
-  languageOptionText: {
+  languageDropdownArrow: {
     fontSize: 12,
     color: '#666',
+    marginLeft: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  languageDropdownModal: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingVertical: 16,
+    minWidth: 200,
+    maxWidth: 280,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+  },
+  languageDropdownTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 20,
+  },
+  languageDropdownOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  languageDropdownOptionActive: {
+    backgroundColor: '#f0f8ff',
+  },
+  languageDropdownOptionText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  languageDropdownOptionTextActive: {
+    color: '#CD853F',
     fontWeight: '600',
   },
-  languageOptionTextActive: {
-    color: 'white',
+  languageDropdownCheck: {
+    fontSize: 16,
+    color: '#CD853F',
+    fontWeight: 'bold',
   },
   formalitySelector: {
     flexDirection: 'row',
@@ -1330,7 +1567,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   formalityOptionActive: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
   },
   formalityOptionText: {
     fontSize: 12,
@@ -1363,7 +1600,7 @@ const styles = StyleSheet.create({
   },
   userMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     borderRadius: 16,
     borderBottomRightRadius: 4,
     paddingHorizontal: 12,
@@ -1420,7 +1657,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   sendButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
@@ -1433,5 +1670,175 @@ const styles = StyleSheet.create({
   sendButtonText: {
     color: 'white',
     fontWeight: '600',
+  },
+  // Loading history styles
+  loadingHistoryContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e1e5e9',
+  },
+  loadingHistoryText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#666',
+  },
+  // Tab bar styles
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e1e5e9',
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+    flexDirection: 'row',
+  },
+  activeTab: {
+    borderBottomColor: '#CD853F',
+  },
+  tabText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  activeTabText: {
+    color: '#CD853F',
+    fontWeight: '600',
+  },
+  insightsBadge: {
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 6,
+  },
+  insightsBadgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  // Chat content styles
+  chatContent: {
+    flex: 1,
+  },
+  // Insights styles
+  insightsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+  },
+  emptyInsightsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyInsightsIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  emptyInsightsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyInsightsText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  insightsList: {
+    flex: 1,
+  },
+  insightsContent: {
+    padding: 16,
+  },
+  insightItem: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e1e5e9',
+  },
+  insightHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  insightEmoji: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  insightHeaderText: {
+    flex: 1,
+  },
+  insightText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  insightMeta: {
+    fontSize: 13,
+    color: '#666',
+  },
+  urgencyBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  urgencyText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  sourceSnippet: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  insightSeparator: {
+    height: 12,
+  },
+  // Test button styles (development only)
+  testButton: {
+    backgroundColor: '#CD853F',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  testButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

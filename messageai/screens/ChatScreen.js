@@ -23,6 +23,7 @@ import {
   createOrGetChat,
   sendMessage,
   sendPhotoMessage,
+  sendAudioMessage,
   subscribeToMessages,
   subscribeToUsers,
   markMessagesAsRead,
@@ -45,18 +46,28 @@ import InlineTranslation from '../components/InlineTranslation';
 // Removed: import AITranslationMessage from '../components/AITranslationMessage';
 import SmartTextInput from '../components/SmartTextInput';
 import SmartTextAssistant from '../components/SmartTextAssistant';
+import AudioMessageBubble from '../components/AudioMessageBubble';
+import SimpleVoiceRecorder from '../components/SimpleVoiceRecorder';
+import GroupMemberList from '../components/GroupMemberList';
+// import AudioMessageManager from '../components/AudioMessageManager'; // Temporarily disabled - requires react-native-gesture-handler
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 // AI imports moved to dynamic imports for better bundle splitting
 import subscriptionManager from '../utils/subscriptionManager';
 import { printSubscriptionAnalysis } from '../utils/subscriptionDebugger';
-import { shouldShowTranslationForChat } from '../utils/chatLanguageAnalysis';
+// Removed chat language analysis - users can speak any language!
 import { generateProactiveTranslations, estimateProactiveTranslationCost } from '../utils/proactiveTranslation';
 import { 
   setTranslationState, 
   getTranslationStates,
   isTranslationExpanded 
 } from '../utils/translationStateManager';
+import { processMessageForInsights } from '../utils/insightsProcessor';
+import { 
+  getCachedTranslation,
+  cacheTranslation
+} from '../utils/autoTranslationState';
+import OfflineCache from '../utils/offlineCache';
 
 // Utility functions for translate all toggle persistence
 const TRANSLATE_ALL_STORAGE_KEY = 'msgapp_translateAllEnabled';
@@ -97,6 +108,11 @@ export default function ChatScreen({ route, navigation }) {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(!route?.params?.chatId);
   const [sendingPhoto, setSendingPhoto] = useState(false);
+  
+  // Audio message state
+  const [playingAudioId, setPlayingAudioId] = useState(null);
+  const [audioObjects, setAudioObjects] = useState(new Map());
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const flatListRef = useRef(null);
   const [userProfiles, setUserProfiles] = useState([]);
   const [presenceData, setPresenceData] = useState({});
@@ -105,21 +121,30 @@ export default function ChatScreen({ route, navigation }) {
   const [typingUsers, setTypingUsers] = useState([]);
   const typingTimeoutRef = useRef(null);
   
-  // Auto-translation state
-  const [autoTranslateSettings, setAutoTranslateSettings] = useState({
-    enabled: false,
-    targetLanguage: 'English',
-    formality: 'casual'
-  });
   
   // Translate all messages toggle state
   const [translateAllEnabled, setTranslateAllEnabled] = useState(false);
   
+  // Debug: Log toggle state changes
+  useEffect(() => {
+    console.log('🌐 TOGGLE STATE CHANGED:', translateAllEnabled);
+  }, [translateAllEnabled]);
+  
   // Track processed messages to avoid re-translating
   const processedMessageIds = useRef(new Set());
   
-  // Inline translation state
-  const [translationRecommendation, setTranslationRecommendation] = useState(null);
+  // NEW: Translation replacement state - tracks which messages are showing translations vs originals
+  const [messageTranslations, setMessageTranslations] = useState({}); // { messageId: { translation, originalText, isShowingOriginal } }
+  const [processingTranslations, setProcessingTranslations] = useState(false);
+  const [translationLoadingState, setTranslationLoadingState] = useState(null); // 'checking-cache' | 'generating' | null
+  
+  // Inline translation state (kept for fallback cases)
+  const [translationRecommendation, setTranslationRecommendation] = useState({
+    shouldShow: true, // Always enable translations for international communication
+    userLanguage: 'English',
+    chatLanguage: 'Mixed',
+    reason: 'International communication - translate all foreign messages'
+  });
   const [translationStates, setTranslationStates] = useState({});
   const [userLanguage, setUserLanguage] = useState('English');
   
@@ -135,10 +160,233 @@ export default function ChatScreen({ route, navigation }) {
   const [smartTextData, setSmartTextData] = useState(null);
   const [languageDetection, setLanguageDetection] = useState({ detected: false, language: null });
   
-  // Clear processed message IDs when chat changes
+  // Group member list state
+  const [showMemberList, setShowMemberList] = useState(false);
+  
+  // Track which messages need translation UI (not in user's native language)
+  const [messagesNeedingTranslation, setMessagesNeedingTranslation] = useState(new Set());
+  
+  // Offline cache state
+  const [usingCachedMessages, setUsingCachedMessages] = useState(false);
+  const [cachedMessageCount, setCachedMessageCount] = useState(0);
+  
+  // Clear processed message IDs and caches when chat changes
   useEffect(() => {
     processedMessageIds.current.clear();
+    // Also clear language detection cache when chat changes
+    languageDetectionCache.current.clear();
+    // Clear in-memory translation cache when switching chats
+    translationMemoryCache.current = null;
   }, [chatId]);
+
+  // OPTIMIZATION: Add language detection cache to avoid re-detecting same messages
+  const languageDetectionCache = useRef(new Map());
+  
+  // OPTIMIZATION: In-memory translation cache for instant access
+  const translationMemoryCache = useRef(null);
+
+  // OPTIMIZED: Comprehensive language detection heuristics to minimize API calls
+  const fastLanguageHeuristic = useCallback((messageText, userNativeLanguage) => {
+    if (!messageText || messageText.trim().length < 8) {
+      // Very short messages - assume same language to avoid API call
+      return { confident: true, isSameLanguage: true, reason: 'too_short' };
+    }
+
+    const text = messageText.toLowerCase().trim();
+    const userLang = userNativeLanguage.toLowerCase();
+    const words = text.split(/\s+/);
+    
+    // Skip if mostly numbers, URLs, or symbols
+    const numericRatio = (text.match(/\d/g) || []).length / text.length;
+    if (numericRatio > 0.5 || text.includes('http') || text.includes('www.')) {
+      return { confident: true, isSameLanguage: true, reason: 'numeric_or_url' };
+    }
+
+    // Enhanced English detection
+    if (userLang.includes('english')) {
+      const englishCommon = ['the', 'and', 'you', 'that', 'was', 'for', 'are', 'with', 'his', 'they', 'this', 'have', 'will', 'your', 'can', 'not', 'but', 'what', 'all', 'would', 'there', 'when'];
+      const englishVerbs = ['is', 'am', 'are', 'was', 'were', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'get', 'got', 'go', 'went', 'come', 'came', 'see', 'saw', 'know', 'knew', 'think', 'thought', 'want', 'like', 'need', 'make', 'made'];
+      const englishPronouns = ['i', 'me', 'my', 'mine', 'we', 'us', 'our', 'ours', 'he', 'him', 'she', 'her', 'it', 'its'];
+      
+      const englishWords = [...englishCommon, ...englishVerbs, ...englishPronouns];
+      const englishMatches = words.filter(word => englishWords.includes(word.replace(/[.,!?;:]$/, ''))).length;
+      
+      // Check for Spanish indicators
+      const spanishWords = ['que', 'el', 'la', 'de', 'y', 'en', 'un', 'es', 'se', 'no', 'te', 'lo', 'le', 'da', 'su', 'por', 'son', 'con', 'para', 'una', 'del', 'los', 'las', 'como', 'pero', 'sus', 'está', 'todo', 'esta', 'ser', 'hay', 'donde', 'más', 'muy', 'me', 'ya', 'así', 'aquí'];
+      const spanishMatches = words.filter(word => spanishWords.includes(word.replace(/[.,!?;:]$/, ''))).length;
+      
+      // French indicators  
+      const frenchWords = ['le', 'de', 'et', 'à', 'un', 'il', 'être', 'et', 'en', 'avoir', 'que', 'pour', 'dans', 'ce', 'son', 'une', 'sur', 'avec', 'ne', 'se', 'pas', 'par', 'mais', 'du', 'au', 'vous', 'je', 'nous', 'elle', 'les', 'des', 'ces', 'cette', 'mes', 'ses', 'nos', 'vos', 'leurs'];
+      const frenchMatches = words.filter(word => frenchWords.includes(word.replace(/[.,!?;:]$/, ''))).length;
+      
+      const totalWords = Math.max(words.length, 1);
+      const englishRatio = englishMatches / totalWords;
+      const spanishRatio = spanishMatches / totalWords;
+      const frenchRatio = frenchMatches / totalWords;
+      
+      if (englishRatio >= 0.4 && spanishRatio <= 0.15 && frenchRatio <= 0.15) {
+        return { confident: true, isSameLanguage: true, reason: `english_heuristic_${Math.round(englishRatio * 100)}%` };
+      }
+      if (spanishRatio >= 0.3 && englishRatio <= 0.2) {
+        return { confident: true, isSameLanguage: false, reason: `spanish_detected_${Math.round(spanishRatio * 100)}%` };
+      }
+      if (frenchRatio >= 0.3 && englishRatio <= 0.2) {
+        return { confident: true, isSameLanguage: false, reason: `french_detected_${Math.round(frenchRatio * 100)}%` };
+      }
+    }
+
+    // Enhanced Spanish detection  
+    if (userLang.includes('spanish') || userLang.includes('español')) {
+      const spanishWords = ['que', 'el', 'la', 'de', 'y', 'en', 'un', 'es', 'se', 'no', 'te', 'lo', 'le', 'da', 'su', 'por', 'son', 'con', 'para', 'una', 'del', 'los', 'las', 'como', 'pero', 'sus', 'está', 'todo', 'esta', 'ser', 'hay', 'donde', 'más', 'muy', 'me', 'ya', 'así', 'aquí'];
+      const spanishMatches = words.filter(word => spanishWords.includes(word.replace(/[.,!?;:]$/, ''))).length;
+      const spanishRatio = spanishMatches / Math.max(words.length, 1);
+      
+      if (spanishRatio >= 0.4) {
+        return { confident: true, isSameLanguage: true, reason: `spanish_heuristic_${Math.round(spanishRatio * 100)}%` };
+      }
+    }
+
+    // Enhanced character set detection
+    const hasAccents = /[áéíóúüñ¿¡àèùâêîôûçë]/i.test(text);
+    const hasCyrillic = /[а-яё]/i.test(text);
+    const hasArabic = /[\u0600-\u06FF]/i.test(text);
+    const hasChinese = /[\u4e00-\u9fff]/i.test(text);
+    const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/i.test(text);
+    const hasKorean = /[\uac00-\ud7af]/i.test(text);
+
+    // Strong character set indicators
+    if (hasCyrillic || hasArabic || hasChinese || hasJapanese || hasKorean) {
+      const isUserNonLatin = userLang.includes('chinese') || userLang.includes('japanese') || 
+                            userLang.includes('korean') || userLang.includes('arabic') || 
+                            userLang.includes('russian') || userLang.includes('cyrillic');
+      return { confident: true, isSameLanguage: isUserNonLatin, reason: 'non_latin_script' };
+    }
+
+    // Accent detection for Romance languages
+    if (hasAccents) {
+      const isUserRomance = userLang.includes('spanish') || userLang.includes('french') || 
+                           userLang.includes('italian') || userLang.includes('portuguese');
+      const isUserEnglish = userLang.includes('english');
+      
+      if (isUserEnglish) {
+        return { confident: true, isSameLanguage: false, reason: 'accented_chars_non_english' };
+      }
+      if (isUserRomance) {
+        return { confident: false, isSameLanguage: false, reason: 'accented_chars_romance' }; // Less certain
+      }
+    }
+
+    // Emoji and casual text patterns
+    const emojiCount = (text.match(/[\u{1f600}-\u{1f64f}\u{1f300}-\u{1f5ff}\u{1f680}-\u{1f6ff}\u{1f1e0}-\u{1f1ff}]/gu) || []).length;
+    if (emojiCount > words.length * 0.3) {
+      return { confident: true, isSameLanguage: true, reason: 'emoji_heavy' };
+    }
+
+    // If we couldn't determine with confidence, use API
+    return { confident: false, isSameLanguage: false, reason: 'needs_api' };
+  }, []);
+
+  // OPTIMIZED: Helper function with caching and heuristics
+  const isMessageInUserLanguage = useCallback(async (messageText, userNativeLanguage) => {
+    if (!messageText || !userNativeLanguage) return false;
+    
+    // Check cache first
+    const cacheKey = `${messageText.substring(0, 100)}_${userNativeLanguage}`;
+    if (languageDetectionCache.current.has(cacheKey)) {
+      const cached = languageDetectionCache.current.get(cacheKey);
+      console.log(`⚡ Using cached language detection: ${cached ? 'SAME' : 'DIFFERENT'} (cache size: ${languageDetectionCache.current.size})`);
+      return cached;
+    }
+
+    // Try fast heuristics first
+    const heuristic = fastLanguageHeuristic(messageText, userNativeLanguage);
+    if (heuristic.confident) {
+      console.log(`⚡ Fast heuristic detection (${heuristic.reason}): ${heuristic.isSameLanguage ? 'SAME LANGUAGE' : 'DIFFERENT LANGUAGE'}`);
+      // Cache heuristic results too
+      if (languageDetectionCache.current.size > 100) {
+        const entries = Array.from(languageDetectionCache.current.entries());
+        entries.slice(0, 50).forEach(([key]) => languageDetectionCache.current.delete(key));
+      }
+      languageDetectionCache.current.set(cacheKey, heuristic.isSameLanguage);
+      return heuristic.isSameLanguage;
+    }
+    
+    try {
+      // Fall back to API detection for unclear cases
+      const { detectLanguage } = await import('../utils/aiService');
+      const detection = await detectLanguage(messageText);
+      
+      if (detection.success) {
+        const detectedLang = detection.language.toLowerCase();
+        const userLang = userNativeLanguage.toLowerCase();
+        const confidence = detection.confidence || 0;
+        
+        console.log(`🔍 API language detection for "${messageText.substring(0, 30)}...": detected="${detectedLang}", user="${userLang}", confidence=${confidence}`);
+        
+        const isMatch = detectedLang === userLang ||
+                       (detectedLang.includes('english') && userLang.includes('english')) ||
+                       (detectedLang.includes('spanish') && userLang.includes('spanish')) ||
+                       (detectedLang.includes('french') && userLang.includes('french')) ||
+                       (detectedLang.includes('german') && userLang.includes('german')) ||
+                       (confidence > 0.8 && detectedLang.includes(userLang.substring(0, 4)));
+        
+        // Cache the result with size management
+        if (languageDetectionCache.current.size > 100) {
+          // Clear oldest entries if cache gets too large
+          const entries = Array.from(languageDetectionCache.current.entries());
+          entries.slice(0, 50).forEach(([key]) => languageDetectionCache.current.delete(key));
+        }
+        languageDetectionCache.current.set(cacheKey, isMatch);
+        console.log(`🔍 API detection result (cached): ${isMatch ? 'SAME LANGUAGE' : 'DIFFERENT LANGUAGE'}`);
+        return isMatch;
+      }
+      return false;
+    } catch (error) {
+      console.error('❌ Language detection failed:', error);
+      return false;
+    }
+  }, [fastLanguageHeuristic]);
+
+  // Analyze messages to determine which need translation UI
+  useEffect(() => {
+    if (!messages.length || !userLanguagePreference) return;
+    
+    const analyzeMessages = async () => {
+      const analysisStartTime = Date.now();
+      const targetLanguage = userLanguagePreference || 'English';
+      const newMessagesNeedingTranslation = new Set();
+      
+      // Check incoming messages (not from current user, not AI)
+      const incomingMessages = messages.filter(msg => 
+        msg.senderId !== user?.uid && 
+        msg.type !== 'ai' && 
+        msg.text && 
+        msg.text.trim().length > 0
+      );
+      
+      // Batch language detection for efficiency
+      const detectionPromises = incomingMessages.map(async (message) => {
+        const isSameLanguage = await isMessageInUserLanguage(message.text, targetLanguage);
+        return { messageId: message.id, needsTranslation: !isSameLanguage };
+      });
+      
+      const results = await Promise.all(detectionPromises);
+      
+      results.forEach(result => {
+        if (result.needsTranslation) {
+          newMessagesNeedingTranslation.add(result.messageId);
+        }
+      });
+      
+      const analysisEndTime = Date.now();
+      console.log(`🔍 OPTIMIZED Language analysis complete: ${newMessagesNeedingTranslation.size} out of ${incomingMessages.length} messages need translation UI (${analysisEndTime - analysisStartTime}ms)`);
+      setMessagesNeedingTranslation(newMessagesNeedingTranslation);
+    };
+    
+    // OPTIMIZED: Reduced debounce time for faster response
+    const timeoutId = setTimeout(analyzeMessages, 300);
+    return () => clearTimeout(timeoutId);
+  }, [messages, userLanguagePreference, user?.uid, isMessageInUserLanguage]);
 
   // Load translate all toggle state when chat changes - do this early and only once per chat
   useEffect(() => {
@@ -164,6 +412,86 @@ export default function ChatScreen({ route, navigation }) {
     }
   }, [chatId]);
 
+  // OPTIMIZATION: Preload translations into memory cache when chat loads
+  useEffect(() => {
+    if (chatId && messages.length > 5) { // Wait for some messages to load
+      // Preload in background - this makes toggle instant even on first press
+      const preloadTranslations = async () => {
+        try {
+          console.log('🚀 Preloading translations for instant toggle...');
+          await loadCachedTranslationsOnly();
+        } catch (error) {
+          console.log('⚠️ Preload failed, will load on demand:', error.message);
+        }
+      };
+      
+      // Small delay to let messages settle
+      const timer = setTimeout(preloadTranslations, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [chatId, messages.length, loadCachedTranslationsOnly]);
+
+  // OPTIMIZED: Ultra-fast cache loading with in-memory cache
+  const loadCachedTranslationsOnly = useCallback(async () => {
+    if (!chatId) return null;
+    
+    try {
+      // Check in-memory cache first (instant)
+      if (translationMemoryCache.current && translationMemoryCache.current.chatId === chatId) {
+        console.log(`⚡ Using in-memory cache: ${Object.keys(translationMemoryCache.current.translations).length} translations`);
+        setMessageTranslations(translationMemoryCache.current.translations);
+        return translationMemoryCache.current.translations;
+      }
+      
+      console.log('💾 Loading from AsyncStorage cache for chat:', chatId);
+      const cachedData = await OfflineCache.getCachedMessagesWithTranslations(chatId);
+      
+      if (cachedData && Object.keys(cachedData.translations).length > 0) {
+        console.log(`🚀 Loaded ${Object.keys(cachedData.translations).length} cached translations from storage`);
+        
+        // Store in memory cache for next time
+        translationMemoryCache.current = {
+          chatId,
+          translations: cachedData.translations,
+          loadedAt: Date.now()
+        };
+        
+        setMessageTranslations(cachedData.translations);
+        return cachedData.translations;
+      } else {
+        console.log('📭 No cached translations available');
+        return null;
+      }
+    } catch (error) {
+      console.error('❌ Failed to load cached translations:', error);
+      return null;
+    }
+  }, [chatId]);
+
+  // Auto-restore translations when toggle is enabled and messages are loaded
+  useEffect(() => {
+    if (!translateAllEnabled || !messages.length || !chatId || !user?.uid) return;
+    
+    // Check if translations are already applied (to avoid re-applying on every message change)
+    const hasExistingTranslations = Object.keys(messageTranslations).length > 0;
+    
+    if (!hasExistingTranslations) {
+      console.log('🔄 Auto-restoring translations for enabled toggle with', messages.length, 'messages');
+      
+      // Try cache first - this is instant if available
+      setTranslationLoadingState('checking-cache');
+      loadCachedTranslationsOnly().then((cachedTranslations) => {
+        setTranslationLoadingState(null);
+        if (!cachedTranslations) {
+          // Only regenerate if no cache available - this prevents the slow loading issue
+          console.log('⚠️ No cache available, will regenerate on next toggle or manual action');
+          // Instead of auto-generating, we'll let the user know and regenerate when they interact
+          setProcessingTranslations(false); // Ensure we're not stuck in loading state
+        }
+      });
+    }
+  }, [translateAllEnabled, messages.length, chatId, user?.uid, messageTranslations, loadCachedTranslationsOnly]);
+
   // DEVELOPMENT: Log subscription analysis (remove in production)
   useEffect(() => {
     if (__DEV__ && chatId) {
@@ -177,13 +505,9 @@ export default function ChatScreen({ route, navigation }) {
     }
   }, [chatId]);
   
-  // Callback for auto-translate settings changes - memoized to prevent re-renders
-  const handleAutoTranslateChange = useCallback((settings) => {
-    setAutoTranslateSettings(settings);
-    console.log('🔄 Auto-translate settings updated:', settings);
-  }, []);
+
   
-  // Handle translate all toggle
+  // OPTIMIZED: Handle translate all toggle with cache-first approach
   const handleTranslateAllToggle = useCallback(async (enabled) => {
     console.log('🔄 Toggle switch pressed - setting enabled to:', enabled, 'for chat:', chatId);
     setTranslateAllEnabled(enabled);
@@ -198,40 +522,433 @@ export default function ChatScreen({ route, navigation }) {
     }
     
     if (enabled) {
-      // When enabled, trigger translation of last 20 messages and set up auto-translation
-      console.log('🚀 Starting translate all mode - processing last 20 messages');
+      // When enabled, try cache first for instant loading
+      console.log('🚀 Starting translate all mode - checking cache first');
+      setTranslationLoadingState('checking-cache');
+      setProcessingTranslations(true);
+      
       try {
-        // Trigger enhanced proactive translation for last 20 messages
-        const result = await generateProactiveTranslations(
-          chatId, 
-          messages.slice(-20), // Get last 20 messages
-          user?.uid, 
-          { 
-            maxMessages: 20, 
-            forceRefresh: false, // Use cache if available
-            autoExpand: true // New flag to auto-expand translations
-          }
-        );
+        // OPTIMIZATION: Check cache first for instant results
+        const cachedTranslations = await loadCachedTranslationsOnly();
         
-        if (result.success) {
-          console.log(`✅ Generated ${result.translationsGenerated} translations for translate all mode`);
-          setPreGeneratedTranslations(prev => ({
-            ...prev,
-            ...result.preGeneratedTranslations
-          }));
+        if (cachedTranslations && Object.keys(cachedTranslations).length > 0) {
+          console.log(`⚡ Using ${Object.keys(cachedTranslations).length} cached translations - instant loading!`);
+          setTranslationLoadingState(null);
+          setProcessingTranslations(false);
+          return; // Cache hit - we're done!
         }
+        
+        // No cache available - need to generate translations
+        console.log('📭 No cache available, generating translations...');
+        setTranslationLoadingState('generating');
+        const toggleStartTime = Date.now();
+        // Get last 30 incoming messages (not from current user)
+        const incomingMessages = messages
+          .filter(msg => msg.senderId !== user?.uid && msg.type !== 'ai' && msg.text && msg.text.trim().length > 0)
+          .slice(-30); // Last 30 incoming messages
+        
+        console.log(`📝 Found ${incomingMessages.length} incoming messages to check for translation`);
+        
+        if (incomingMessages.length === 0) {
+          console.log('⏭️ No messages to translate, finishing');
+          setTranslationLoadingState(null);
+          setProcessingTranslations(false);
+          return;
+        }
+        
+        const targetLanguage = userLanguagePreference || 'English';
+        
+        // OPTIMIZED: Filter messages in parallel for better performance
+        const languageCheckPromises = incomingMessages.map(async (message) => {
+          const isSameLanguage = await isMessageInUserLanguage(message.text, targetLanguage);
+          return { message, needsTranslation: !isSameLanguage };
+        });
+        
+        const languageResults = await Promise.all(languageCheckPromises);
+        const messagesToTranslate = languageResults
+          .filter(result => {
+            if (!result.needsTranslation) {
+              console.log(`⏭️ Skipping message already in ${targetLanguage}:`, result.message.text.substring(0, 50) + '...');
+            }
+            return result.needsTranslation;
+          })
+          .map(result => result.message);
+        
+        console.log(`🌐 ${messagesToTranslate.length} out of ${incomingMessages.length} messages need translation`);
+        
+        if (messagesToTranslate.length === 0) {
+          console.log('⏭️ No messages need translation, finishing');
+          setTranslationLoadingState(null);
+          setProcessingTranslations(false);
+          return;
+        }
+        
+        const translationPromises = messagesToTranslate.map(async (message) => {
+          try {
+            // Dynamic import for better bundle splitting
+            const { translateText } = await import('../utils/aiService');
+            const translationResult = await translateText({
+              text: message.text,
+              targetLanguage: targetLanguage,
+              formality: 'casual',
+              culturalContext: {
+                chatContext: 'message-replacement',
+                userLocation: user?.location
+              }
+            });
+            
+            if (translationResult.success) {
+              return {
+                messageId: message.id,
+                translation: translationResult.translation,
+                originalText: message.text,
+                culturalNotes: translationResult.culturalNotes || [],
+                detectedLanguage: translationResult.detectedLanguage,
+                isShowingOriginal: false // Initially show translation
+              };
+            }
+            return null;
+          } catch (error) {
+            console.error(`❌ Failed to translate message ${message.id}:`, error);
+            return null;
+          }
+        });
+        
+        const translationResults = (await Promise.all(translationPromises)).filter(Boolean);
+        
+        // Update messageTranslations state to replace message content
+        const newTranslations = {};
+        translationResults.forEach(result => {
+          newTranslations[result.messageId] = result;
+        });
+        
+        setMessageTranslations(prev => {
+          const updatedTranslations = {
+            ...prev,
+          ...newTranslations
+          };
+          
+          // Cache translations for offline use (background task)
+          if (chatId && messages.length > 0) {
+            setTimeout(async () => {
+              try {
+                await OfflineCache.cacheMessagesWithTranslations(chatId, messages, updatedTranslations);
+                console.log('💾 Cached updated translations for offline use');
+              } catch (error) {
+                console.error('❌ Failed to cache translations:', error);
+              }
+            }, 100);
+          }
+          
+          return updatedTranslations;
+        });
+        
+        const toggleEndTime = Date.now();
+        console.log(`✅ OPTIMIZED: Replaced content for ${translationResults.length} messages with translations in ${toggleEndTime - toggleStartTime}ms`);
+        
       } catch (error) {
-        console.error('❌ Failed to generate translations for translate all mode:', error);
+        console.error('❌ Failed to process message replacements:', error);
+      } finally {
+        setTranslationLoadingState(null);
+        setProcessingTranslations(false);
       }
     } else {
-      console.log('🔄 Disabled translate all mode');
+      // When disabled, clear all message replacements (show originals)
+      console.log('🔄 Disabled translate all mode - reverting to original messages');
+      setMessageTranslations({});
+      setTranslationLoadingState(null);
+      setProcessingTranslations(false);
     }
-  }, [chatId, messages, user?.uid]);
+  }, [chatId, messages, user?.uid, userLanguagePreference, isMessageInUserLanguage, loadCachedTranslationsOnly]);
 
-  // Auto-translate new messages when enabled - memoized to prevent re-renders
+  // Enhanced auto translation for new messages with caching (unused now - AI Assistant auto-translate removed)
+  const handleAutoTranslateNewMessages = useCallback(async (newMessages) => {
+    return; // Disabled - auto-translate functionality removed from AI Assistant
+
+    console.log('🔄 Auto-translating', newMessages.length, 'new messages');
+
+    for (const message of newMessages) {
+      try {
+        // Skip if already processed or is from current user/AI
+        if (processedMessageIds.current.has(message.id) || 
+            message.senderId === user?.uid || 
+            message.type === 'ai' || 
+            !message.text) {
+          continue;
+        }
+
+        // Mark as processed to avoid duplicate processing
+        processedMessageIds.current.add(message.id);
+
+        // Check cache first for performance
+        const cachedTranslation = null; // Disabled - autoTranslateSettings removed
+
+        let translationResult;
+
+        if (cachedTranslation) {
+          console.log('🚀 Using cached translation for message:', message.id);
+          translationResult = cachedTranslation;
+        } else {
+          // Generate new translation
+          console.log('🌐 Generating new auto translation for message:', message.id);
+          const { translateText } = await import('../utils/aiService');
+          
+          translationResult = null; // Disabled - autoTranslateSettings removed
+
+          // Cache the result for future use
+          if (translationResult.success) {
+            await cacheTranslation(message.text, translationResult);
+          }
+        }
+
+        if (translationResult.success) {
+          // Replace message content in UI (same approach as translate all toggle)
+          setMessageTranslations(prev => {
+            const updatedTranslations = {
+            ...prev,
+            [message.id]: {
+              translation: translationResult.translation,
+              originalText: message.text,
+              isShowingOriginal: false,
+              culturalNotes: translationResult.culturalNotes || [],
+              confidence: translationResult.confidence || 0.95,
+              autoTranslated: true
+            }
+            };
+            
+            // Cache updated translations for offline use (background task)
+            if (chatId && messages.length > 0) {
+              setTimeout(async () => {
+                try {
+                  await OfflineCache.cacheMessagesWithTranslations(chatId, messages, updatedTranslations);
+                } catch (error) {
+                  console.error('❌ Failed to cache auto-translation:', error);
+                }
+              }, 100);
+            }
+            
+            return updatedTranslations;
+          });
+
+          console.log('✅ Auto translation applied to message:', message.id);
+        }
+      } catch (error) {
+        console.error('❌ Auto translation failed for message:', message.id, error);
+      }
+    }
+  }, [user?.uid]);
+
+  // Preload auto translations for existing messages when auto translation is enabled
+  const preloadAutoTranslations = useCallback(async (settings) => {
+    if (!settings.enabled || !messages.length) return;
+
+    console.log('🔄 Preloading auto translations for', messages.length, 'existing messages');
+
+    // Filter messages that need translation (incoming messages not from current user)
+    const messagesNeedingTranslation = messages.filter(msg => 
+      msg.type !== 'ai' && 
+      msg.senderId !== user?.uid &&
+      msg.text &&
+      msg.text.trim().length > 0 &&
+      !processedMessageIds.current.has(msg.id)
+    );
+
+    if (messagesNeedingTranslation.length === 0) {
+      console.log('✅ No messages need preloading');
+      return;
+    }
+
+    console.log('📥 Preloading translations for', messagesNeedingTranslation.length, 'messages');
+    
+    // Process in small batches to avoid overwhelming the system
+    const BATCH_SIZE = 3;
+    const translationUpdates = {};
+
+    for (let i = 0; i < messagesNeedingTranslation.length; i += BATCH_SIZE) {
+      const batch = messagesNeedingTranslation.slice(i, i + BATCH_SIZE);
+      
+      const batchPromises = batch.map(async (message) => {
+        try {
+          // Mark as processed
+          processedMessageIds.current.add(message.id);
+
+          // Check cache first
+          const cachedTranslation = null; // Disabled - autoTranslateSettings removed
+
+          let translationResult;
+
+          if (cachedTranslation) {
+            console.log('🚀 Using cached preload translation for:', message.id);
+            translationResult = cachedTranslation;
+          } else {
+            // Generate new translation
+            console.log('🌐 Generating preload translation for:', message.id);
+            const { translateText } = await import('../utils/aiService');
+            
+            translationResult = await translateText({
+              text: message.text,
+              targetLanguage: settings.targetLanguage,
+              formality: settings.formality,
+              culturalContext: {
+                chatContext: 'preload-auto-translation',
+                messageId: message.id,
+                userLocation: user?.location
+              }
+            });
+
+            // Cache the result
+            if (translationResult.success) {
+              await cacheTranslation(message.text, translationResult);
+            }
+          }
+
+          if (translationResult.success) {
+            translationUpdates[message.id] = {
+              translation: translationResult.translation,
+              originalText: message.text,
+              isShowingOriginal: false,
+              culturalNotes: translationResult.culturalNotes || [],
+              confidence: translationResult.confidence || 0.95,
+              autoTranslated: true,
+              preloaded: true
+            };
+          }
+        } catch (error) {
+          console.error('❌ Preload translation failed for message:', message.id, error);
+        }
+      });
+
+      await Promise.all(batchPromises);
+
+      // Small delay between batches to avoid rate limiting
+      if (i + BATCH_SIZE < messagesNeedingTranslation.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    // Apply all translations at once for better performance
+    if (Object.keys(translationUpdates).length > 0) {
+      setMessageTranslations(prev => {
+        const updatedTranslations = {
+        ...prev,
+        ...translationUpdates
+        };
+        
+        // Cache preloaded translations for offline use (background task)
+        if (chatId && messages.length > 0) {
+          setTimeout(async () => {
+            try {
+              await OfflineCache.cacheMessagesWithTranslations(chatId, messages, updatedTranslations);
+              console.log('💾 Cached preloaded translations for offline use');
+            } catch (error) {
+              console.error('❌ Failed to cache preloaded translations:', error);
+            }
+          }, 100);
+        }
+        
+        return updatedTranslations;
+      });
+      
+      console.log('✅ Preloaded', Object.keys(translationUpdates).length, 'auto translations');
+    }
+  }, [messages, user?.uid]);
+
+  // Auto-translate new incoming messages when translate all is enabled - NEW: Replace content
+  const handleAutoTranslateNewMessage = useCallback(async (message) => {
+    console.log('🔄 handleAutoTranslateNewMessage called for message:', message.id, message.text.substring(0, 50));
+    
+    // Only auto-translate if translate all toggle is enabled
+    if (!translateAllEnabled) {
+      console.log('❌ Auto-translate disabled, skipping message:', message.id);
+      return;
+    }
+    
+    // Skip if message is from current user, AI, or already processed
+    if (message.senderId === user?.uid || 
+        message.type === 'ai' || 
+        processedMessageIds.current.has(message.id)) {
+      console.log('⏭️ Skipping message - from user/AI/already processed:', message.id);
+      return;
+    }
+    
+    // Skip if message doesn't have text
+    if (!message.text || message.text.trim() === '') {
+      console.log('⏭️ Skipping message - no text:', message.id);
+      return;
+    }
+    
+    const targetLanguage = userLanguagePreference || 'English';
+    
+    // Check if message is already in user's native language
+    const isSameLanguage = await isMessageInUserLanguage(message.text, targetLanguage);
+    if (isSameLanguage) {
+      console.log(`⏭️ Skipping auto-translation - message already in ${targetLanguage}:`, message.text.substring(0, 50) + '...');
+      processedMessageIds.current.add(message.id); // Mark as processed to avoid re-checking
+      return;
+    }
+    
+    try {
+      console.log('🔄 Auto-translating new message for replacement:', message.text.substring(0, 100));
+      
+      // Mark as processed to avoid duplicate translations
+      processedMessageIds.current.add(message.id);
+      
+      // Dynamic import for better bundle splitting
+      const { translateText } = await import('../utils/aiService');
+      const translationResult = await translateText({
+        text: message.text,
+        targetLanguage: targetLanguage,
+        formality: 'casual',
+        culturalContext: {
+          chatContext: 'auto-message-replacement',
+          userLocation: user?.location
+        }
+      });
+      
+      if (translationResult.success) {
+        console.log('✅ Auto-translation successful for message:', message.id, 'translation:', translationResult.translation.substring(0, 100));
+        // Replace message content by updating messageTranslations state
+        setMessageTranslations(prev => {
+          const updatedTranslations = {
+          ...prev,
+          [message.id]: {
+            messageId: message.id,
+            translation: translationResult.translation,
+            originalText: message.text,
+            culturalNotes: translationResult.culturalNotes || [],
+            detectedLanguage: translationResult.detectedLanguage,
+            isShowingOriginal: false // Show translation by default
+          }
+          };
+          
+          // Cache new auto-translation for offline use (background task)
+          if (chatId && messages.length > 0) {
+            setTimeout(async () => {
+              try {
+                await OfflineCache.cacheMessagesWithTranslations(chatId, messages, updatedTranslations);
+              } catch (error) {
+                console.error('❌ Failed to cache new auto-translation:', error);
+              }
+            }, 100);
+          }
+          
+          return updatedTranslations;
+        });
+        
+        console.log('✅ Auto-replaced message content with translation:', message.id);
+      } else {
+        console.log('❌ Translation failed, message will show original content');
+      }
+    } catch (error) {
+      console.error('❌ Auto-translation failed:', error);
+      // Don't show error to user, message will appear in original language
+    }
+  }, [translateAllEnabled, user?.uid, userLanguagePreference, isMessageInUserLanguage]);
+  
+  // Keep the old auto-translate function for the AI assistant auto-translate feature
   const handleAutoTranslateMessage = useCallback(async (message) => {
-    // Skip if auto-translate is disabled
-    if (!autoTranslateSettings.enabled) return;
+    // Auto-translate functionality removed from AI Assistant
+    return;
     
     // Skip if message is from current user, AI, or already processed
     if (message.senderId === user?.uid || 
@@ -253,8 +970,7 @@ export default function ChatScreen({ route, navigation }) {
       const { translateText } = await import('../utils/aiService');
       const translationResult = await translateText({
         text: message.text,
-        targetLanguage: autoTranslateSettings.targetLanguage,
-        formality: autoTranslateSettings.formality,
+        // Disabled - autoTranslateSettings removed
         culturalContext: {
           chatContext: 'auto-translation',
           userLocation: user?.location
@@ -263,7 +979,7 @@ export default function ChatScreen({ route, navigation }) {
       
       if (translationResult.success) {
         // Create auto-translation message display
-        let translationDisplay = `🔄 **Auto-Translation** (${translationResult.detectedLanguage || 'Auto'} → ${autoTranslateSettings.targetLanguage}):\n\n${translationResult.translation}`;
+        let translationDisplay = `🔄 **Auto-Translation** (Disabled):\n\n${translationResult.translation}`;
         
         // Add quality indicators
         if (translationResult.qualityMetrics) {
@@ -285,8 +1001,7 @@ export default function ChatScreen({ route, navigation }) {
           metadata: {
             originalText: message.text,
             sourceLanguage: translationResult.detectedLanguage,
-            targetLanguage: autoTranslateSettings.targetLanguage,
-            formality: autoTranslateSettings.formality,
+            // Disabled - autoTranslateSettings removed
             confidence: translationResult.confidence,
             isAutomatic: true
           },
@@ -303,7 +1018,7 @@ export default function ChatScreen({ route, navigation }) {
       console.error('❌ Auto-translation failed:', error);
       // Don't show error to user for auto-translations, just log it
     }
-  }, [autoTranslateSettings, user, chatId]); // Dependencies: only re-create when these values change
+  }, [user, chatId]); // Dependencies: only re-create when these values change
   
   // Load translation states when chat changes
   useEffect(() => {
@@ -334,24 +1049,22 @@ export default function ChatScreen({ route, navigation }) {
       try {
         setProactiveTranslationLoading(true);
         
-        // First, analyze if we need translations at all
-        const recommendation = await shouldShowTranslationForChat(
-          chatId, 
-          messages, 
-          user.uid,
-          { forceRefresh: false }
-        );
-        
-        console.log('🔍 Translation recommendation result:', recommendation);
-        // Always enable translation buttons regardless of recommendation
-        // Use the user's preferred language from LocalizationContext
+        // SIMPLIFIED: Always enable translations - users can speak any language!
+        // Each message will be individually checked against user's language preference
         const targetLanguage = userLanguagePreference || 'English';
-        console.log('🌍 Using user language preference:', targetLanguage, 'from LocalizationContext');
-        console.log('📝 Setting up translations with target language:', targetLanguage);
-        setTranslationRecommendation({ shouldShow: true, userLanguage: targetLanguage, targetLanguage });
+        console.log('🌍 User language preference:', targetLanguage);
+        console.log('✅ Translation enabled for all foreign messages');
+        
+        setTranslationRecommendation({ 
+          shouldShow: true, 
+          userLanguage: targetLanguage, 
+          targetLanguage,
+          chatLanguage: 'Mixed', // No single chat language - users speak freely!
+          reason: 'International communication - translate all foreign messages'
+        });
         setUserLanguage(targetLanguage);
         
-        if (false) { // Disable complex logic - always show buttons
+        if (false) { // Disable old complex logic
           console.log('🎯 Chat needs translations, generating proactively...');
           
           // Estimate cost before proceeding
@@ -426,6 +1139,38 @@ export default function ChatScreen({ route, navigation }) {
     handleTranslationToggle(messageId, false);
   }, [handleTranslationToggle]);
   
+  // NEW: Handle message click to toggle between translated and original content
+  const handleMessageClick = useCallback((messageId) => {
+    const translationData = messageTranslations[messageId];
+    if (!translationData) return; // No translation available
+    
+    console.log('🔄 Toggling message view for:', messageId, 'currently showing original:', translationData.isShowingOriginal);
+    
+    // Toggle between showing translation and original
+    setMessageTranslations(prev => {
+      const updatedTranslations = {
+      ...prev,
+      [messageId]: {
+        ...prev[messageId],
+        isShowingOriginal: !prev[messageId].isShowingOriginal
+      }
+      };
+      
+      // Cache toggle state for offline use (background task, lower priority)
+      if (chatId && messages.length > 0) {
+        setTimeout(async () => {
+          try {
+            await OfflineCache.cacheMessagesWithTranslations(chatId, messages, updatedTranslations);
+          } catch (error) {
+            console.error('❌ Failed to cache translation toggle state:', error);
+          }
+        }, 200); // Slightly longer delay for toggle state
+      }
+      
+      return updatedTranslations;
+    });
+  }, [messageTranslations]);
+  
   // Filter out current user from typing users
   const othersTypingUsers = useMemo(() => {
     const filtered = typingUsers.filter(userId => userId !== user?.uid);
@@ -476,15 +1221,57 @@ export default function ChatScreen({ route, navigation }) {
 
     console.log('📡 Subscribing to messages for chat:', chatId);
     
+    // Load cached messages first (especially when offline)
+    const loadCachedMessages = async () => {
+      if (isOffline) {
+        console.log('📱 Offline detected - loading cached messages');
+        const cachedData = await OfflineCache.getCachedMessagesWithTranslations(chatId);
+        
+        if (cachedData) {
+          console.log(`📦 Using ${cachedData.messages.length} cached messages with ${Object.keys(cachedData.translations).length} translations`);
+          setMessages(cachedData.messages);
+          setMessageTranslations(cachedData.translations);
+          setUsingCachedMessages(true);
+          setCachedMessageCount(cachedData.messages.length);
+          setLoading(false);
+          setTimeout(() => scrollToBottom(), 100);
+          return;
+        } else {
+          console.log('📭 No cached messages available for offline use');
+          setUsingCachedMessages(false);
+          setCachedMessageCount(0);
+        }
+      } else {
+        // Reset cache indicators when online
+        setUsingCachedMessages(false);
+        setCachedMessageCount(0);
+      }
+    };
+
+    // Load cached messages first if offline
+    loadCachedMessages();
+    
     const unsubscribe = subscriptionManager.subscribe(
       `messages-${chatId}`,
       (callback) => subscribeToMessages(chatId, callback, 50), // Limit to 50 messages
       async (msgs) => {
         console.log('📨 Received messages:', msgs.length);
         
-        setMessages(msgs);
+        // If we had cached messages and now have fresh messages, merge them intelligently
+        const currentMessages = messages.length > 0 ? messages : [];
+        const mergedData = OfflineCache.mergeCachedWithFresh(msgs, currentMessages, messageTranslations);
+        
+        setMessages(mergedData.messages);
         setLoading(false);
         setTimeout(() => scrollToBottom(), 100);
+        
+        // Clear cache indicators when fresh messages are received
+        if (msgs.length > 0 && !isOffline) {
+          setUsingCachedMessages(false);
+          setCachedMessageCount(0);
+          console.log('💾 Caching fresh messages and translations for offline use');
+          await OfflineCache.cacheMessagesWithTranslations(chatId, msgs, messageTranslations);
+        }
         
         // Mark unread messages as read (batch operation)
         if (user?.uid) {
@@ -495,6 +1282,18 @@ export default function ChatScreen({ route, navigation }) {
           if (unreadMessages.length > 0) {
             const unreadIds = unreadMessages.map(msg => msg.id);
             markMessagesAsRead(chatId, unreadIds, user.uid);
+          }
+        }
+
+        // Process new messages for structured data extraction (background)
+        if (msgs.length > 0 && user?.uid) {
+          // Get most recent messages to check for new ones
+          const recentMessages = msgs.slice(0, 5); // Check last 5 messages for new insights
+          for (const message of recentMessages) {
+            // Find sender profile for context
+            const senderProfile = users.find(u => u.id === message.senderId) || {};
+            // Process in background (non-blocking)
+            processMessageForInsights(message, chatId, user.uid, senderProfile);
           }
         }
         
@@ -508,7 +1307,7 @@ export default function ChatScreen({ route, navigation }) {
     );
 
     return () => unsubscribe();
-  }, [chatId, user?.uid]); // Remove translateAllEnabled and preGeneratedTranslations to prevent subscription loops
+  }, [chatId, user?.uid, isOffline]); // Add isOffline to dependencies
 
   // Separate effect for translate all mode auto-generation to avoid subscription loops
   useEffect(() => {
@@ -558,9 +1357,12 @@ export default function ChatScreen({ route, navigation }) {
     }
   }, [translateAllEnabled, messages, user?.uid, chatId, preGeneratedTranslations]);
 
-  // Separate effect for auto-translation to avoid subscription loops
+  // Handle new message auto-translation for translate all toggle
   useEffect(() => {
-    if (!autoTranslateSettings.enabled || !messages.length) return;
+    if (!translateAllEnabled || !messages.length) {
+      console.log('🔄 Auto-translate useEffect early return - translateAllEnabled:', translateAllEnabled, 'messages.length:', messages.length);
+      return;
+    }
     
     // Find new messages that haven't been processed for auto-translation
     const currentMessageIds = new Set(processedMessageIds.current);
@@ -572,16 +1374,21 @@ export default function ChatScreen({ route, navigation }) {
       msg.text.trim() !== ''
     );
     
-    // Process each new message for auto-translation with debounce
+    console.log('🔄 Auto-translate check - total messages:', messages.length, 'new messages:', newMessages.length, 'processed IDs:', processedMessageIds.current.size);
+    
+    // Process each new message based on which mode is enabled
     if (newMessages.length > 0) {
-      console.log(`🔄 Processing ${newMessages.length} new messages for auto-translation`);
-      newMessages.forEach(message => {
-        processedMessageIds.current.add(message.id);
-        // Use delay to ensure the message is saved first and avoid rapid-fire translations
-        setTimeout(() => handleAutoTranslateMessage(message), 1500);
-      });
+        console.log(`🔄 Processing ${newMessages.length} new messages for content replacement`);
+        newMessages.forEach(message => {
+          processedMessageIds.current.add(message.id);
+        console.log('🚀 Triggering auto-translate for message:', message.id, message.text.substring(0, 50));
+          // Use delay to ensure the message is saved first
+          setTimeout(() => handleAutoTranslateNewMessage(message), 1000);
+        });
+    } else {
+      console.log('📝 No new messages to auto-translate');
     }
-  }, [messages, autoTranslateSettings.enabled, handleAutoTranslateMessage, user?.uid]);
+  }, [messages, translateAllEnabled, handleAutoTranslateNewMessage, user?.uid]);
 
   // OPTIMIZED: Get user profiles from shared cache (no redundant subscription)
   useEffect(() => {
@@ -845,6 +1652,73 @@ export default function ChatScreen({ route, navigation }) {
   const handleSmartTextUpdate = (newText) => {
     setNewMessage(newText);
     setSmartAssistantVisible(false);
+  };
+
+  // Handle navigation to source message from conversation insights
+  const handleNavigateToMessage = useCallback((messageId) => {
+    // Find the message in our current messages array
+    const messageIndex = messages.findIndex(msg => msg.id === messageId);
+    
+    if (messageIndex !== -1 && flatListRef.current) {
+      // Scroll to the message (using reverse indexing since messages are reversed in FlatList)
+      const scrollIndex = messages.length - 1 - messageIndex;
+      
+      try {
+        flatListRef.current.scrollToIndex({
+          index: scrollIndex,
+          animated: true,
+          viewPosition: 0.5 // Center the message on screen
+        });
+        
+        console.log('📍 Navigated to message:', messageId, 'at index:', scrollIndex);
+      } catch (error) {
+        console.error('❌ Error scrolling to message:', error);
+        // Fallback: scroll to end and let user find it manually
+        flatListRef.current.scrollToEnd({ animated: true });
+      }
+    } else {
+      console.log('❌ Message not found or FlatList ref not available:', messageId);
+    }
+  }, [messages]);
+
+  // Audio playback management
+  const handleAudioPlayStateChange = useCallback(async (isPlaying, audioId) => {
+    try {
+      if (isPlaying) {
+        // Stop any currently playing audio
+        if (playingAudioId && playingAudioId !== audioId) {
+          const currentAudio = audioObjects.get(playingAudioId);
+          if (currentAudio) {
+            await currentAudio.pauseAsync();
+          }
+        }
+        setPlayingAudioId(audioId);
+      } else {
+        setPlayingAudioId(null);
+      }
+    } catch (error) {
+      console.error('Error managing audio playback:', error);
+    }
+  }, [playingAudioId, audioObjects]);
+
+  // Cleanup audio objects when component unmounts
+  useEffect(() => {
+    return () => {
+      // Cleanup all audio objects
+      audioObjects.forEach(async (audio) => {
+        try {
+          await audio.unloadAsync();
+        } catch (error) {
+          console.error('Error unloading audio:', error);
+        }
+      });
+      setAudioObjects(new Map());
+    };
+  }, []);
+
+  // Handle voice message selection from menu
+  const handleVoiceMessageSelected = () => {
+    setShowVoiceRecorder(true);
   };
 
   const handleSendMessage = async (messageText = null, options = {}) => {
@@ -1119,6 +1993,29 @@ export default function ChatScreen({ route, navigation }) {
       );
     }
 
+    // Render audio messages
+    if (item.type === 'audio' && item.audio) {
+      return (
+        <View
+          style={[
+            styles.messageContainer,
+            isMyMessage ? styles.myMessageContainer : styles.theirMessageContainer,
+          ]}
+        >
+          <AudioMessageBubble
+            audioUri={item.audio.url}
+            duration={item.audio.duration * 1000} // Convert to milliseconds
+            isOwn={isMyMessage}
+            timestamp={formatTime(item.timestamp)}
+            senderName={isMyMessage ? null : senderName}
+            onPlayStateChange={handleAudioPlayStateChange}
+            isPlaying={playingAudioId === item.audio.url}
+          />
+          <Text style={styles.readIndicator}>{readIndicator}</Text>
+        </View>
+      );
+    }
+
     // Render photo messages differently
     if (item.type === 'photo' && item.photo) {
       return (
@@ -1172,7 +2069,7 @@ export default function ChatScreen({ route, navigation }) {
             </View>
             {sendingPhoto && item.sending && (
               <View style={styles.sendingOverlay}>
-                <ActivityIndicator size="small" color="#007AFF" />
+                <ActivityIndicator size="small" color="#CD853F" />
                 <Text style={styles.sendingText}>Sending photo...</Text>
               </View>
             )}
@@ -1180,6 +2077,14 @@ export default function ChatScreen({ route, navigation }) {
         </View>
       );
     }
+
+    // NEW: Check if this message has translation data
+    const translationData = messageTranslations[item.id];
+    const isTranslated = translationData && !translationData.isShowingOriginal;
+    const isShowingOriginal = translationData && translationData.isShowingOriginal;
+    
+    // Determine what text to show
+    const displayText = isTranslated ? translationData.translation : item.text;
 
     // Render text messages
     return (
@@ -1189,12 +2094,17 @@ export default function ChatScreen({ route, navigation }) {
           isMyMessage ? styles.myMessageContainer : styles.theirMessageContainer,
         ]}
       >
-        <View
+        <TouchableOpacity
           style={[
             styles.messageBubble,
             isMyMessage ? styles.myMessageBubble : styles.theirMessageBubble,
             item.sending && styles.sendingMessage,
+            // NEW: Add blue border if message is translated
+            isTranslated && styles.translatedMessageBubble,
           ]}
+          onPress={() => translationData ? handleMessageClick(item.id) : undefined}
+          disabled={!translationData}
+          activeOpacity={translationData ? 0.7 : 1}
         >
           {!isMyMessage && chatMembers && chatMembers.length > 2 && (
             <Text style={styles.senderName}>{senderName}</Text>
@@ -1205,19 +2115,36 @@ export default function ChatScreen({ route, navigation }) {
               isMyMessage ? styles.myMessageText : styles.theirMessageText,
             ]}
           >
-            {item.text}
+            {displayText}
           </Text>
           
-          {/* iOS-Style Inline Translation beneath message */}
-          {!isMyMessage && 
-           (translationRecommendation?.shouldShow || translateAllEnabled) && 
-           item.text && 
-           item.text.trim().length > 0 && (
+          {/* Show old translation system when viewing original of a translated message */}
+          {isShowingOriginal && translationData && (
             <InlineTranslation
               messageId={item.id}
-              messageText={item.text}
+              messageText={translationData.originalText} // Use the stored original text
               userLanguage={userLanguage}
-              chatLanguage={translationRecommendation?.chatLanguage || 'Unknown'}
+              chatLanguage={translationData.detectedLanguage || 'Unknown'} // Use detected language from translation
+              chatId={chatId}
+              preGeneratedTranslations={{ [item.id]: { translation: translationData.translation, culturalNotes: translationData.culturalNotes } }}
+              translationState={null} // Don't force state - let component manage its own progression
+              onToggle={handleTranslationToggle}
+              translateAllEnabled={false}
+              autoExpand={true} // Auto-expand to show translation first, then allow cultural context
+            />
+          )}
+          
+          {/* Show old inline translation system for non-translated messages when toggle is off */}
+          {!translationData && !isMyMessage && 
+           (translationRecommendation?.shouldShow && !translateAllEnabled) && 
+           item.text && 
+           item.text.trim().length > 0 && 
+           messagesNeedingTranslation.has(item.id) && ( // NEW: Only show if message needs translation
+            <InlineTranslation
+              messageId={item.id}
+              messageText={item.text} // This is always original text since !translationData
+              userLanguage={userLanguage}
+              chatLanguage={'Mixed'} // No single chat language - users speak any language!
               chatId={chatId}
               preGeneratedTranslations={preGeneratedTranslations}
               translationState={translationStates[item.id]}
@@ -1226,6 +2153,8 @@ export default function ChatScreen({ route, navigation }) {
               autoExpand={translateAllEnabled}
             />
           )}
+          
+          {/* Translation button removed for messages already showing translations - user can tap message bubble to toggle */}
           
           <View style={styles.messageFooter}>
             <Text
@@ -1254,11 +2183,11 @@ export default function ChatScreen({ route, navigation }) {
               </>
             )}
           </View>
-        </View>
+        </TouchableOpacity>
         {/* Translation button now moved inside message bubble above */}
       </View>
     );
-  }, [user?.uid, getDisplayName, chatMembers, formatTime]); // Dependencies for renderMessage
+  }, [user?.uid, getDisplayName, chatMembers, formatTime, messageTranslations, handleMessageClick, userLanguage, translationRecommendation, chatId, preGeneratedTranslations, translationStates, handleTranslationToggle, translateAllEnabled, messagesNeedingTranslation, playingAudioId, handleAudioPlayStateChange]); // Dependencies for renderMessage
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1292,39 +2221,69 @@ export default function ChatScreen({ route, navigation }) {
           disabled={!chatMembers || chatMembers.length < 3}
         >
           <Text style={styles.title}>{chatTitle}</Text>
-          {chatPresenceText && (
+          {(processingTranslations || translationLoadingState) && (
+            <Text style={styles.processingText}>
+              {translationLoadingState === 'checking-cache' ? '⚡ Loading translations...' :
+               translationLoadingState === 'generating' ? '🌐 Generating translations...' :
+               processingTranslations ? (t('processingTranslations') || 'Processing translations...') : ''}
+            </Text>
+          )}
+          {!processingTranslations && !translationLoadingState && chatPresenceText && (
             <Text style={styles.presenceText}>{chatPresenceText}</Text>
           )}
         </TouchableOpacity>
         <View style={styles.headerSide}>
+          {/* Show members button for group chats (3+ members) */}
+          {chatMembers && chatMembers.length >= 3 ? (
+            <View style={styles.headerRightGroup}>
+              <TouchableOpacity
+                style={styles.membersButton}
+                onPress={() => setShowMemberList(true)}
+              >
+                <Text style={styles.membersButtonText}>👥</Text>
+                <Text style={styles.membersButtonCount}>{chatMembers.length}</Text>
+              </TouchableOpacity>
           <View style={styles.translateToggleContainer}>
             <Text style={styles.translateToggleLabel}>🌐</Text>
             <Switch
               value={translateAllEnabled}
               onValueChange={handleTranslateAllToggle}
-              trackColor={{ false: '#e0e0e0', true: '#007AFF' }}
+              trackColor={{ false: '#e0e0e0', true: '#CD853F' }}
               thumbColor={translateAllEnabled ? '#fff' : '#f4f3f4'}
               ios_backgroundColor="#e0e0e0"
               style={styles.translateToggle}
               testID="translate-all-toggle"
             />
           </View>
+            </View>
+          ) : (
+            <View style={styles.translateToggleContainer}>
+              <Text style={styles.translateToggleLabel}>🌐</Text>
+              <Switch
+                value={translateAllEnabled}
+                onValueChange={handleTranslateAllToggle}
+                trackColor={{ false: '#e0e0e0', true: '#CD853F' }}
+                thumbColor={translateAllEnabled ? '#fff' : '#f4f3f4'}
+                ios_backgroundColor="#e0e0e0"
+                style={styles.translateToggle}
+                testID="translate-all-toggle"
+              />
+            </View>
+          )}
         </View>
       </View>
 
       {isOffline && (
         <View style={styles.offlineBanner}>
-          <Text style={styles.offlineText}>{t('offline')}</Text>
-        </View>
-      )}
-      
-      {autoTranslateSettings.enabled && (
-        <View style={styles.autoTranslateBanner}>
-          <Text style={styles.autoTranslateText}>
-            🔄 Live Translation ON → {autoTranslateSettings.targetLanguage} ({autoTranslateSettings.formality})
+          <Text style={styles.offlineText}>
+            {usingCachedMessages 
+              ? `${t('offline')} - Showing ${cachedMessageCount} cached messages`
+              : t('offline')
+            }
           </Text>
         </View>
       )}
+      
 
       <KeyboardAvoidingView
         style={styles.content}
@@ -1332,7 +2291,7 @@ export default function ChatScreen({ route, navigation }) {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 44 : 90}
       >
         {loading ? (
-          <ActivityIndicator size="large" color="#007AFF" style={styles.loader} />
+          <ActivityIndicator size="large" color="#CD853F" style={styles.loader} />
         ) : (
           <>
             <FlatList
@@ -1358,15 +2317,16 @@ export default function ChatScreen({ route, navigation }) {
             <View style={styles.inputContainer}>
               <AIMenuButton 
                 onPhotoSelected={handleSendPhoto}
+                onVoiceMessageSelected={handleVoiceMessageSelected}
                 disabled={sendingPhoto || isOffline}
                 chatId={chatId}
                 messages={messages}
                 userProfiles={userProfiles}
-                onAutoTranslateChange={handleAutoTranslateChange}
                 currentUser={user}
                 smartTextData={smartTextData}
                 languageDetected={languageDetection.detected}
                 onSmartTextPress={() => setSmartAssistantVisible(true)}
+                onNavigateToMessage={handleNavigateToMessage}
               />
               <SmartTextInput
                 style={styles.input}
@@ -1393,12 +2353,35 @@ export default function ChatScreen({ route, navigation }) {
           </>
         )}
         
+        {/* Voice Message Recorder Modal */}
+        <SimpleVoiceRecorder
+          visible={showVoiceRecorder}
+          onClose={() => setShowVoiceRecorder(false)}
+          chatId={chatId}
+          currentUser={user}
+          onSendComplete={(messageId, audioData) => {
+            console.log('Voice message sent:', messageId);
+            // Optional: Add success feedback
+          }}
+        />
+
         {/* Smart Text Assistant Modal */}
         <SmartTextAssistant
           visible={smartAssistantVisible}
           onClose={() => setSmartAssistantVisible(false)}
           textData={smartTextData}
           onTextUpdate={handleSmartTextUpdate}
+        />
+
+        {/* Group Member List Modal */}
+        <GroupMemberList
+          visible={showMemberList}
+          onClose={() => setShowMemberList(false)}
+          chatMembers={chatMembers}
+          userProfiles={userProfiles}
+          presenceData={presenceData}
+          currentUserId={user?.uid}
+          chatTitle={chatTitle}
         />
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -1430,17 +2413,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  autoTranslateBanner: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-  },
-  autoTranslateText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
-  },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -1451,12 +2423,43 @@ const styles = StyleSheet.create({
     color: '#34C759',
     marginTop: 2,
   },
+  processingText: {
+    fontSize: 12,
+    color: '#CD853F',
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
   headerSide: {
     width: 72,
   },
   headerTitleWrapper: {
     flex: 1,
     alignItems: 'center',
+  },
+  headerRightGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  membersButton: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    minWidth: 32,
+  },
+  membersButtonText: {
+    fontSize: 16,
+  },
+  membersButtonCount: {
+    fontSize: 10,
+    color: '#CD853F',
+    fontWeight: '600',
+    marginTop: -2,
   },
   translateToggleContainer: {
     flexDirection: 'column',
@@ -1475,7 +2478,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   backButtonText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -1514,12 +2517,17 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   myMessageBubble: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     borderBottomRightRadius: 4,
   },
   theirMessageBubble: {
     backgroundColor: '#E5E5EA',
     borderBottomLeftRadius: 4,
+  },
+  translatedMessageBubble: {
+    borderWidth: 2,
+    borderColor: '#CD853F',
+    backgroundColor: '#F0F8FF', // Light blue background
   },
   sendingMessage: {
     opacity: 0.7,
@@ -1621,7 +2629,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   sendButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     borderRadius: 20,
     paddingHorizontal: 20,
     paddingVertical: 10,
@@ -1651,7 +2659,7 @@ const styles = StyleSheet.create({
     marginLeft: 0,
   },
   seeTranslationText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -1663,7 +2671,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   inlineTranslationText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 12,
     fontWeight: '500',
   },

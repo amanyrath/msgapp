@@ -30,6 +30,9 @@ function Navigation() {
   const navigationRef = useRef();
   const [showSplash, setShowSplash] = useState(true);
   const [showLanguageInit, setShowLanguageInit] = useState(false);
+  
+  // Prevent repeated language init calls
+  const languageInitShownRef = useRef(false);
 
   // Handle splash screen completion
   const handleSplashComplete = () => {
@@ -43,21 +46,34 @@ function Navigation() {
     setShowLanguageInit(false);
   };
 
-  // Force language initialization screen on every login
+  // Enhanced language initialization flow - ALWAYS show after login to fetch fresh user preferences
   useEffect(() => {
-    if (user && !loading && !showSplash) {
-      console.log('🔄 Forcing language initialization screen for user:', user.uid);
+    if (user && !loading && !showSplash && !languageInitShownRef.current) {
+      console.log('🔄 User authenticated, showing language initialization to fetch fresh preferences:', user.uid);
+      languageInitShownRef.current = true;
       setShowLanguageInit(true);
-    } else if (!user) {
-      console.log('👤 User logged out, hiding language initialization');
+    } else if (!user && showLanguageInit) {
+      console.log('👤 User logged out, resetting language initialization for next login');
+      languageInitShownRef.current = false;
       setShowLanguageInit(false);
     }
   }, [user, loading, showSplash]);
 
-  // Request notification permissions when user logs in
+  // Reset language initialization state when user changes (for fresh login sessions)
+  useEffect(() => {
+    if (user?.uid) {
+      // Reset for new user session to ensure fresh language fetch
+      languageInitShownRef.current = false;
+    }
+  }, [user?.uid]);
+
+  // PERFORMANCE OPTIMIZATION: Defer notification permissions to background
   useEffect(() => {
     if (user) {
-      registerForPushNotifications();
+      // Defer notification registration to not block initial load
+      setTimeout(() => {
+        registerForPushNotifications();
+      }, 100); // Register after 100ms to allow main UI to load first
     }
   }, [user]);
 
@@ -84,7 +100,7 @@ function Navigation() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#CD853F" />
       </View>
     );
   }

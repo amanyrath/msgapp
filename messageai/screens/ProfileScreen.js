@@ -50,7 +50,9 @@ export default function ProfileScreen({ navigation }) {
     'Dutch',
     'Swedish',
     'Norwegian',
-    'Finnish'
+    'Finnish',
+    'Khmer',
+    'Lao'
   ];
 
   useEffect(() => {
@@ -411,7 +413,7 @@ export default function ProfileScreen({ navigation }) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+          <ActivityIndicator size="large" color="#CD853F" />
         </View>
       </SafeAreaView>
     );
@@ -578,7 +580,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   backText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -606,7 +608,7 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -661,7 +663,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 10,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -680,11 +682,11 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 8,
     borderLeftWidth: 4,
-    borderLeftColor: '#007AFF',
+    borderLeftColor: '#CD853F',
   },
   languageUpdatingText: {
     fontSize: 14,
-    color: '#007AFF',
+    color: '#CD853F',
     fontWeight: '500',
     textAlign: 'center',
   },
@@ -715,7 +717,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   saveButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
   },
   signOutButton: {
     backgroundColor: 'transparent',

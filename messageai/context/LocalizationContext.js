@@ -6,9 +6,11 @@ import {
   isSystemLanguageEnglish,
   getSystemLanguage,
   getLanguageName,
+  hasStaticLocaleSupport,
+  loadStaticLocale,
   DEFAULT_UI_STRINGS
 } from '../utils/localization';
-import { getCachedUserLanguagePreference, updateCachedUserLanguagePreference } from '../utils/languageIntegration';
+import { getCachedUserLanguagePreference, updateCachedUserLanguagePreference, clearCachedUserLanguagePreference } from '../utils/languageIntegration';
 
 /**
  * LocalizationContext - Provides translated UI strings throughout the app
@@ -28,6 +30,10 @@ const LocalizationContext = createContext({
   // Translation functions
   t: (key, params) => key,
   translateText: (text) => text,
+  
+  // Static locale support
+  hasStaticLocaleSupport: (language) => false,
+  loadStaticLocale: (language) => null,
   
   // State
   isLoading: false,
@@ -55,9 +61,11 @@ export function LocalizationProvider({ children }) {
   const [forcedLanguage, setForcedLanguage] = useState(null);
 
   /**
-   * Initialize localization system - start with basic setup only
+   * Initialize localization system - wait for user context
    */
   useEffect(() => {
+    // Only do basic system language detection initially
+    // Don't set any language preferences until user is available
     initializeBasicLanguageSystem();
   }, []);
 
@@ -87,32 +95,31 @@ export function LocalizationProvider({ children }) {
         console.log('Initializing basic localization system...');
       }
 
-      // Initialize localization and get system language (but don't use it yet)
+      // Initialize localization and get system language info
       const languageInfo = await initializeLocalization();
       
       setSystemLanguage(languageInfo.locale);
       
-      // Don't set language name or load translations yet - wait for user preference
       if (__DEV__) {
-        console.log(`System language detected: ${languageInfo.language}, waiting for user preference...`);
+        console.log(`System language detected: ${languageInfo.language}, waiting for user authentication...`);
       }
       
-      // Start with English defaults until user preference is loaded
-      setStrings(DEFAULT_UI_STRINGS);
-      setIsEnglish(true);
-      setLanguageName('English');
+      // DON'T set any language defaults here - wait for actual user preference
+      // This prevents the flash of English content before user language loads
+      // setStrings will be set when initializeUserLanguage is called
 
       setIsInitialized(true);
     } catch (error) {
       // Always show initialization errors
       console.error('Failed to initialize localization:', error);
-      // Fallback to English
+      // Only fallback to English on complete failure
       setStrings(DEFAULT_UI_STRINGS);
       setIsEnglish(true);
       setLanguageName('English');
       setIsInitialized(true);
     } finally {
-      setIsLoading(false);
+      // Keep loading state until user language is loaded
+      // setIsLoading(false); - This will be handled by initializeUserLanguage
     }
   };
 
@@ -209,125 +216,153 @@ export function LocalizationProvider({ children }) {
   }, []);
 
   /**
-   * Initialize user's language preference from their profile
+   * Initialize user's language preference from their profile (OPTIMIZED for fast startup)
    * @param {string} userId - User ID
+   * @param {boolean} forceRefresh - Force fresh data fetch (optional, defaults to false for speed)
    */
   const initializeUserLanguage = useCallback(async (userId, forceRefresh = false) => {
-    if (!userId) return;
+    if (!userId) {
+      console.warn('No user ID provided for language initialization');
+      // Set default English and end loading
+      setUserLanguagePreference('English');
+      setLanguageName('English');
+      setIsEnglish(true);
+      setStrings(DEFAULT_UI_STRINGS);
+      setIsLoading(false);
+      return;
+    }
     
     try {
       setCurrentUserId(userId);
-      setIsLoading(true); // Show loading state during language initialization
-      console.log('🌍 Initializing user language preference for:', userId, forceRefresh ? '(FORCED)' : '');
+      console.log('🌍 Initializing user language preference for:', userId, forceRefresh ? '(FORCED - FRESH FETCH)' : '(CACHED ALLOWED)');
       
-      // Get user's saved language preference from cached data (optimized)
-      // If forceRefresh is true, bypass cache to get fresh data
-      const savedLanguage = forceRefresh ? 
-        await (async () => {
-          try {
-            const { getUserLanguagePreference, getUserProfileWithLanguage } = await import('../utils/firestore');
-            
-            // DEBUG: Let's see what's actually in the user's profile
-            console.log('🔍 DEBUG: Fetching fresh user profile data...');
-            const fullProfile = await getUserProfileWithLanguage(userId);
-            console.log('🔍 DEBUG: Full user profile:', JSON.stringify(fullProfile, null, 2));
-            
-            const languagePref = await getUserLanguagePreference(userId);
-            console.log('🔍 DEBUG: Language preference from getUserLanguagePreference:', languagePref);
-            
-            return languagePref;
-          } catch (error) {
-            console.error('Error getting fresh language preference:', error);
-            return 'English';
+      // Clear stale cached data when forcing refresh (e.g., after login)
+      if (forceRefresh) {
+        console.log('🧹 Clearing stale cached language data for fresh fetch');
+        clearCachedUserLanguagePreference(userId);
+      }
+      
+      // Try multiple fallback strategies for maximum reliability
+      let savedLanguage = null;
+      
+      // ALWAYS prioritize fresh Firestore data after login to get user's actual preference
+      if (forceRefresh) {
+        console.log('🔄 Force refresh: Fetching fresh language preference from Firestore');
+        try {
+          const { getUserLanguagePreference } = await import('../utils/firestore');
+          const freshLanguage = await getUserLanguagePreference(userId);
+          console.log('🔄 Firestore language preference (fresh):', freshLanguage);
+          
+          if (freshLanguage) {
+            savedLanguage = freshLanguage;
+            // Update cache with fresh data for future use
+            try {
+              await updateCachedUserLanguagePreference(userId, freshLanguage);
+              console.log('💾 Updated cache with fresh language preference:', freshLanguage);
+            } catch (cacheUpdateError) {
+              console.warn('Failed to update language cache:', cacheUpdateError);
+            }
           }
-        })() :
-        await getCachedUserLanguagePreference(userId);
+        } catch (firestoreError) {
+          console.warn('Firestore language lookup failed during force refresh:', firestoreError);
+        }
+      }
       
-      console.log('📱 User stored language preference:', savedLanguage, forceRefresh ? '(FRESH)' : '(CACHED)');
+      // Fallback to cached data only if fresh fetch failed or not forced
+      if (!savedLanguage && !forceRefresh) {
+        try {
+          // Strategy: Try cached data (only when not forcing fresh)
+          savedLanguage = await getCachedUserLanguagePreference(userId);
+          console.log('📱 Cached language preference:', savedLanguage);
+        } catch (cacheError) {
+          console.warn('Cache lookup failed:', cacheError);
+        }
+        
+        // If still no cached data, try Firestore as backup
+        if (!savedLanguage) {
+          try {
+            const { getUserLanguagePreference } = await import('../utils/firestore');
+            const freshLanguage = await getUserLanguagePreference(userId);
+            console.log('🔄 Firestore language preference (backup):', freshLanguage);
+            
+            if (freshLanguage) {
+              savedLanguage = freshLanguage;
+            }
+          } catch (firestoreError) {
+            console.warn('Firestore language lookup failed:', firestoreError);
+          }
+        }
+      }
       
-      // PRIORITY: User stored language takes precedence over system language
-      if (savedLanguage && savedLanguage !== 'English') {
-        console.log(`🌐 Loading user's preferred language: ${savedLanguage}`);
-        
-        setUserLanguagePreference(savedLanguage);
-        setLanguageName(savedLanguage);
-        setIsEnglish(false);
-        
-        // Load translations for the user's preferred language
-        await loadTranslations(savedLanguage);
-        console.log(`✅ User language initialized: ${savedLanguage}`);
-        
-      } else if (savedLanguage === 'English') {
-        console.log('🇺🇸 User prefers English, using default strings');
-        
-        setUserLanguagePreference('English');
-        setLanguageName('English');
-        setIsEnglish(true);
-        setStrings(DEFAULT_UI_STRINGS);
-        
-      } else {
-        // No user preference saved, detect and use system language as fallback
-        console.log('⚙️ No user language preference found, detecting system language...');
-        
+      // Strategy 3: If still no language, try system language detection
+      if (!savedLanguage) {
         try {
           const systemLanguage = getSystemLanguage();
           const systemLanguageName = getLanguageName(systemLanguage);
-          
-          // Check if system language is supported
-          const supportedLanguages = [
-            'English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese',
-            'Japanese', 'Chinese', 'Korean', 'Arabic', 'Russian', 'Dutch',
-            'Swedish', 'Norwegian', 'Finnish', 'Polish', 'Czech', 'Hungarian',
-            'Turkish', 'Thai', 'Vietnamese', 'Hindi'
-          ];
-          
-          if (supportedLanguages.includes(systemLanguageName)) {
-            console.log(`🌍 Using detected system language: ${systemLanguageName}`);
-            
-            setUserLanguagePreference(systemLanguageName);
-            setLanguageName(systemLanguageName);
-            setIsEnglish(systemLanguageName === 'English');
-            
-            // Load translations for the system language if not English
-            if (systemLanguageName !== 'English') {
-              await loadTranslations(systemLanguageName);
-            } else {
-              setStrings(DEFAULT_UI_STRINGS);
-            }
-            
-            // Save this preference to user profile for future use
-            try {
-              const { updateUserLanguagePreference } = await import('../utils/firestore');
-              await updateUserLanguagePreference(userId, systemLanguageName);
-              console.log(`✅ Saved detected language preference: ${systemLanguageName}`);
-            } catch (error) {
-              console.warn('Failed to save language preference, will detect again next time:', error);
-            }
-            
-          } else {
-            console.log(`🇺🇸 System language "${systemLanguageName}" not supported, defaulting to English`);
-            setUserLanguagePreference('English');
-            setLanguageName('English');
-            setIsEnglish(true);
-            setStrings(DEFAULT_UI_STRINGS);
-          }
-        } catch (error) {
-          console.error('Failed to detect system language, falling back to English:', error);
-          setUserLanguagePreference('English');
-          setLanguageName('English');
-          setIsEnglish(true);
-          setStrings(DEFAULT_UI_STRINGS);
+          console.log('🌍 Falling back to system language:', systemLanguageName);
+          savedLanguage = systemLanguageName;
+        } catch (systemError) {
+          console.warn('System language detection failed:', systemError);
+          savedLanguage = 'English'; // Final fallback
         }
       }
+      
+      console.log(`🚀 Final language selection: ${savedLanguage}`);
+      
+      // Load the determined language
+      await loadLanguageIfNeeded(savedLanguage);
+      console.log(`✅ User language initialized: ${savedLanguage}`);
+      
     } catch (error) {
       console.error('❌ Failed to initialize user language:', error);
-      // Fallback to English on error
+      // Robust fallback to English
       setUserLanguagePreference('English');
       setLanguageName('English');
       setIsEnglish(true);
       setStrings(DEFAULT_UI_STRINGS);
     } finally {
-      setIsLoading(false); // Hide loading state
+      // Always end loading state
+      setIsLoading(false);
+    }
+  }, [loadLanguageIfNeeded]);
+
+  /**
+   * Helper function to load language without blocking startup
+   */
+  const loadLanguageIfNeeded = useCallback(async (targetLanguage) => {
+    // Ensure we have a valid target language
+    if (!targetLanguage) {
+      console.log('⚠️ No target language provided, defaulting to English');
+      targetLanguage = 'English';
+    }
+    
+    if (targetLanguage !== 'English') {
+      console.log(`🌐 Loading user's preferred language: ${targetLanguage}`);
+      
+      setUserLanguagePreference(targetLanguage);
+      setLanguageName(targetLanguage);
+      setIsEnglish(false);
+      
+      // Load translations with error handling
+      try {
+        await loadTranslations(targetLanguage);
+        console.log(`✅ Translations loaded successfully for ${targetLanguage}`);
+      } catch (error) {
+        console.warn('Translation loading failed, falling back to English:', error);
+        // Fallback to English if translation fails
+        setUserLanguagePreference('English');
+        setLanguageName('English');
+        setIsEnglish(true);
+        setStrings(DEFAULT_UI_STRINGS);
+      }
+      
+    } else {
+      console.log('🇺🇸 Using English, loading default strings');
+      
+      setUserLanguagePreference('English');
+      setLanguageName('English');
+      setIsEnglish(true);
+      setStrings(DEFAULT_UI_STRINGS);
     }
   }, [loadTranslations]);
 
@@ -391,6 +426,10 @@ export function LocalizationProvider({ children }) {
     // Translation functions
     t,
     translateText,
+    
+    // Static locale support
+    hasStaticLocaleSupport,
+    loadStaticLocale,
     
     // State
     isLoading,

@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   primaryButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#CD853F',
     marginTop: 10,
   },
   secondaryButton: {
@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   secondaryButtonText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 16,
   },
 });

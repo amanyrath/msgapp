@@ -2,8 +2,8 @@ import 'dotenv/config';
 
 export default {
   expo: {
-    name: "messageai",
-    slug: "messageai",
+    name: "Babble",
+    slug: "babble",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
@@ -16,7 +16,7 @@ export default {
     },
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.amanyrath.messageai",
+      bundleIdentifier: "com.amanyrath.babble",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSCameraUsageDescription: "This app uses the camera to take photos for sharing in messages.",
@@ -26,10 +26,10 @@ export default {
     android: {
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
-        backgroundColor: "#ffffff"
+        backgroundColor: "#DEB887"
       },
       edgeToEdgeEnabled: true,
-      package: "com.amanyrath.messageai",
+      package: "com.amanyrath.babble",
       permissions: [
         "RECEIVE_BOOT_COMPLETED",
         "CAMERA",
@@ -39,7 +39,7 @@ export default {
     },
     notification: {
       icon: "./assets/icon.png",
-      color: "#007AFF",
+      color: "#CD853F",
       androidMode: "default",
       androidCollapsedTitle: "New messages"
     },
@@ -48,7 +48,7 @@ export default {
         "expo-notifications",
         {
           icon: "./assets/icon.png",
-          color: "#007AFF",
+          color: "#CD853F",
           sounds: ["default"],
           mode: "production"
         }

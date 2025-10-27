@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
   Animated
 } from 'react-native';
-import { translateText } from '../utils/aiService';
+import { fastTranslateText, translateText, explainCulturalContext } from '../utils/aiService';
 import { useLocalization } from '../context/LocalizationContext';
 import { getPreGeneratedTranslation } from '../utils/proactiveTranslation';
 import { getTranslationWithCache } from '../utils/simpleTranslationCache';
@@ -35,11 +35,21 @@ export default function InlineTranslation({
   autoExpand = false,
   style = {}
 }) {
+  console.log('🔄 InlineTranslation rendered for messageId:', messageId, 'messageText:', messageText?.substring(0, 50) + '...', 'autoExpand:', autoExpand, 'chatLanguage:', chatLanguage);
+  
   const { t } = useLocalization();
   const [translationData, setTranslationData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [fadeAnim] = useState(new Animated.Value(0));
+  
+  // Request deduplication - prevent multiple simultaneous calls
+  const [translationRequest, setTranslationRequest] = useState(null);
+  
+  // NEW: Cultural context state
+  const [culturalContextData, setCulturalContextData] = useState(null);
+  const [culturalLoading, setCulturalLoading] = useState(false);
+  const [culturalError, setCulturalError] = useState(null);
   
   // Three-step disclosure states: hidden -> translation -> full context
   const [currentStep, setCurrentStep] = useState(autoExpand ? 1 : 0); // Auto-expand to translation if enabled
@@ -55,10 +65,13 @@ export default function InlineTranslation({
 
   // Auto-expand when translate all mode is enabled
   useEffect(() => {
+    console.log('🔄 InlineTranslation autoExpand useEffect - autoExpand:', autoExpand, 'currentStep:', currentStep, 'translateAllEnabled:', translateAllEnabled);
     if (autoExpand && currentStep === 0) {
+      console.log('🔄 Auto-expanding to step 1');
       setCurrentStep(1); // Auto-show translation
     } else if (!autoExpand && translateAllEnabled === false && currentStep > 0) {
       // Reset when translate all is disabled (but not when just autoExpand is false)
+      console.log('🔄 Resetting to step 0');
       setCurrentStep(0);
     }
   }, [autoExpand, translateAllEnabled]);
@@ -70,11 +83,20 @@ export default function InlineTranslation({
     }
   }, [currentStep]);
   
-  // Sync with parent translation state
+  // Load cultural context when needed (step 2)
   useEffect(() => {
-    if (translationState?.expanded && currentStep === 0) {
+    if (currentStep >= 2 && !culturalContextData && !culturalLoading) {
+      loadCulturalContext();
+    }
+  }, [currentStep]);
+  
+  // Sync with parent translation state (only if translationState is provided)
+  useEffect(() => {
+    if (!translationState) return; // Don't interfere if no state is provided
+    
+    if (translationState.expanded && currentStep === 0) {
       setCurrentStep(1); // Show translation if parent says expanded
-    } else if (!translationState?.expanded && currentStep > 0) {
+    } else if (!translationState.expanded && currentStep > 0) {
       setCurrentStep(0); // Hide if parent says not expanded
     }
   }, [translationState?.expanded]);
@@ -82,10 +104,22 @@ export default function InlineTranslation({
   const loadTranslation = async () => {
     if (!messageText || loading) return;
 
+    // Request deduplication - reuse existing request if in progress
+    if (translationRequest) {
+      console.log('⏳ Reusing existing translation request');
+      try {
+        const result = await translationRequest;
+        return result;
+      } catch (error) {
+        console.warn('⚠️ Existing translation request failed:', error);
+      }
+    }
+
     setLoading(true);
     setError(null);
 
-    try {
+    // Create and store the translation request for deduplication
+    const request = (async () => {
       let result = null;
       
       // 1. Check enhanced memory cache first
@@ -113,22 +147,15 @@ export default function InlineTranslation({
         }
       }
       
-      // Fallback 3: Generate new translation via API
+      // Fallback 3: Generate new FAST translation via API (no cultural analysis)
       if (!result) {
-        console.log('🌐 Generating new inline translation for message:', messageId);
+        console.log('⚡ Generating FAST translation for message:', messageId);
         
-        result = await translateText({
+        result = await fastTranslateText({
           text: messageText,
           targetLanguage: userLanguage,
           sourceLanguage: chatLanguage,
-          formality: 'casual',
-          culturalContext: {
-            chatContext: 'Inline message translation',
-            inline: true,
-            onDemand: true,
-            responseLanguage: userLanguage, // Ensure AI responds in user's language
-            userInterfaceLanguage: userLanguage // Cultural context in user's language
-          }
+          formality: 'casual'
         });
       }
 
@@ -136,33 +163,92 @@ export default function InlineTranslation({
         setTranslationData(result);
         const source = result.fromCache ? 'cached' : 'live API';
         console.log(`✅ Inline translation loaded successfully (${source})`);
+        return result;
       } else {
         setError(result?.error || 'Translation failed');
         console.error('❌ Inline translation failed:', result?.error);
+        throw new Error(result?.error || 'Translation failed');
       }
+    })();
+
+    // Store the request for deduplication
+    setTranslationRequest(request);
+
+    try {
+      const result = await request;
+      return result;
     } catch (err) {
       setError(err.message);
       console.error('❌ Inline translation error:', err);
     } finally {
       setLoading(false);
+      setTranslationRequest(null); // Clear the request when done
+    }
+  };
+
+  // NEW: Load detailed cultural context using GPT-4o
+  const loadCulturalContext = async () => {
+    if (!messageText || culturalLoading || culturalContextData) return;
+
+    setCulturalLoading(true);
+    setCulturalError(null);
+
+    try {
+      console.log('🏛️ Requesting detailed cultural context for ORIGINAL message:', messageText);
+      console.log('🏛️ User language for response:', userLanguage);
+      console.log('🏛️ Current step:', currentStep);
+      console.log('🏛️ CRITICAL: Analyzing ORIGINAL text, not any translation');
+      
+      const result = await explainCulturalContext({
+        text: messageText, // CRITICAL: Use ORIGINAL message text, never translation  
+        userLanguage: userLanguage, // User's native language for the response
+        interfaceLanguage: userLanguage, // Ensure response is in user's language
+        context: {
+          location: 'International chat message',
+          conversationType: 'direct message',
+          chatContext: 'Cultural context explanation for original message'
+        }
+      });
+
+      if (result && result.success) {
+        setCulturalContextData(result);
+        console.log('✅ Cultural context loaded successfully');
+      } else {
+        setCulturalError(result?.error || 'Cultural context analysis failed');
+        console.error('❌ Cultural context failed:', result?.error);
+      }
+    } catch (err) {
+      setCulturalError(err.message);
+      console.error('❌ Cultural context error:', err);
+    } finally {
+      setCulturalLoading(false);
     }
   };
 
   const handleToggle = () => {
     let nextStep;
     
+    console.log('🔄 InlineTranslation handleToggle - currentStep:', currentStep);
+    
     if (currentStep === 0) {
       // First click: Show translation
       nextStep = 1;
+      console.log('🔄 Going to step 1 (show translation)');
       if (!translationData && !loading) {
         loadTranslation();
       }
     } else if (currentStep === 1) {
-      // Second click: Show full cultural context  
+      // Second click: Show full cultural context - NEW: Load detailed context
       nextStep = 2;
+      console.log('🔄 Going to step 2 (show cultural context)');
+      if (!culturalContextData && !culturalLoading) {
+        console.log('🔄 Loading cultural context...');
+        loadCulturalContext(); // Make GPT-4o request for detailed cultural analysis
+      }
     } else {
       // Third click: Hide everything
       nextStep = 0;
+      console.log('🔄 Going to step 0 (hide)');
     }
     
     setCurrentStep(nextStep);
@@ -178,7 +264,7 @@ export default function InlineTranslation({
       return (
         <View style={styles.translationContent}>
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" color="#007AFF" />
+            <ActivityIndicator size="small" color="#CD853F" />
             <Text style={styles.loadingText}>{t('translating')}...</Text>
           </View>
         </View>
@@ -218,12 +304,36 @@ export default function InlineTranslation({
           </Text>
         </View>
 
-        {/* Cultural Context Section - Only shown in step 2 (full context mode) */}
-        {currentStep >= 2 && translationData.culturalNotes && translationData.culturalNotes.length > 0 && (
+        {/* Detailed Cultural Context Section - Only shown in step 2 with GPT-4o analysis */}
+        {currentStep >= 2 && (
           <View style={styles.culturalSection}>
             <Text style={styles.culturalHeaderText}>
               🏛️ {t('culturalContext')}
             </Text>
+            
+            {culturalLoading && (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color="#8E44AD" />
+                <Text style={styles.loadingText}>{t('analyzingCulturalContext') || 'Analyzing cultural context...'}</Text>
+              </View>
+            )}
+            
+            {culturalError && (
+              <Text style={styles.errorText}>
+                {t('culturalAnalysisFailed') || 'Cultural analysis failed'}: {culturalError}
+              </Text>
+            )}
+            
+            {culturalContextData && culturalContextData.culturalContext && (
+              <Text style={styles.culturalNote}>
+                {culturalContextData.culturalContext}
+                      </Text>
+            )}
+            
+            {/* Fallback: Show basic cultural notes if detailed context fails */}
+            {!culturalContextData && !culturalLoading && !culturalError && translationData.culturalNotes && translationData.culturalNotes.length > 0 && (
+              <View>
+                <Text style={styles.fallbackNote}>Basic cultural notes:</Text>
             {translationData.culturalNotes.map((note, index) => (
               <Text key={index} style={styles.culturalNote}>
                 • {note}
@@ -231,28 +341,6 @@ export default function InlineTranslation({
             ))}
           </View>
         )}
-
-        {/* Formality Adjustment - Only shown in step 2 */}
-        {currentStep >= 2 && translationData.formalityAdjustment && (
-          <View style={styles.formalitySection}>
-            <Text style={styles.formalityHeaderText}>
-              🎩 {t('formalityNote')}
-            </Text>
-            <Text style={styles.formalityText}>
-              {translationData.formalityAdjustment}
-            </Text>
-          </View>
-        )}
-
-        {/* Regional Considerations - Only shown in step 2 */}
-        {currentStep >= 2 && translationData.regionalConsiderations && (
-          <View style={styles.regionalSection}>
-            <Text style={styles.regionalHeaderText}>
-              🗺️ {t('regionalNotes')}
-            </Text>
-            <Text style={styles.regionalText}>
-              {translationData.regionalConsiderations}
-            </Text>
           </View>
         )}
       </View>
@@ -261,13 +349,12 @@ export default function InlineTranslation({
 
   // Determine button text based on current step
   const getButtonText = () => {
-    if (currentStep === 0) {
-      return t('seeTranslation') || 'See translation';
-    } else if (currentStep === 1) {
-      return t('seeCulturalContext') || 'See cultural context';
-    } else {
-      return t('hideTranslation') || 'Hide';
-    }
+    const buttonText = currentStep === 0 ? (t('seeTranslation') || 'See translation') :
+                      currentStep === 1 ? (t('seeCulturalContext') || 'See cultural context') :
+                      (t('hideTranslation') || 'Hide');
+    
+    console.log('🔄 InlineTranslation getButtonText - currentStep:', currentStep, 'buttonText:', buttonText);
+    return buttonText;
   };
 
   return (
@@ -305,25 +392,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   toggleButtonText: {
-    color: '#007AFF',
+    color: '#CD853F',
     fontSize: 13, // iOS caption size
     fontWeight: '500', // Lighter weight like iOS
   },
   translationContent: {
     marginTop: 8,
     backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    padding: 14,
-    borderLeftWidth: 4,
-    borderLeftColor: '#007AFF',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    borderRadius: 8,
+    padding: 12,
   },
   loadingContainer: {
     flexDirection: 'row',
@@ -352,7 +429,7 @@ const styles = StyleSheet.create({
   translationHeaderText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#CD853F',
   },
   confidenceText: {
     fontSize: 12,
@@ -366,54 +443,51 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   culturalSection: {
-    marginBottom: 10,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5EA',
+    marginTop: 8,
   },
   culturalHeaderText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#8E44AD',
-    marginBottom: 4,
+    color: '#666',
+    marginBottom: 6,
   },
   culturalNote: {
-    fontSize: 13,
-    color: '#555',
-    lineHeight: 18,
-    marginBottom: 2,
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
   },
   formalitySection: {
-    marginBottom: 10,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5EA',
+    marginTop: 8,
   },
   formalityHeaderText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#E67E22',
-    marginBottom: 4,
+    color: '#666',
+    marginBottom: 6,
   },
   formalityText: {
-    fontSize: 13,
-    color: '#555',
-    lineHeight: 18,
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
   },
   regionalSection: {
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5EA',
+    marginTop: 8,
   },
   regionalHeaderText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#27AE60',
-    marginBottom: 4,
+    color: '#666',
+    marginBottom: 6,
   },
   regionalText: {
-    fontSize: 13,
-    color: '#555',
-    lineHeight: 18,
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
+  },
+  fallbackNote: {
+    fontSize: 12,
+    color: '#999',
+    fontStyle: 'italic',
+    marginBottom: 4,
   },
 });
