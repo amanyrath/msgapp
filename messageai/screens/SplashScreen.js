@@ -8,16 +8,14 @@ import {
   Dimensions,
 } from 'react-native';
 import logger from '../utils/logger';
-import { useLocalization } from '../context/LocalizationContext';
 
 const { width, height } = Dimensions.get('window');
 
 /**
- * SplashScreen - Introduces MessageAI and its purpose
+ * SplashScreen - Introduces Babble and its purpose
  * Shows before main app loads, explains the value proposition
  */
 export default function SplashScreen({ onComplete }) {
-  const { t } = useLocalization();
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
 
@@ -39,11 +37,11 @@ export default function SplashScreen({ onComplete }) {
       }),
     ]).start();
 
-    // Auto-complete after 3 seconds
+    // Auto-complete after shorter delay for faster startup
     const timer = setTimeout(() => {
-      logger.ui('SplashScreen auto-completing after 3s');
+      logger.ui('SplashScreen auto-completing after 800ms');
       onComplete();
-    }, 3000);
+    }, 800); // Reduced from 3000ms to 800ms for faster app launch
 
     return () => clearTimeout(timer);
   }, [fadeAnim, slideAnim, onComplete]);
@@ -66,29 +64,33 @@ export default function SplashScreen({ onComplete }) {
         </View>
 
         {/* App Name */}
-        <Text style={styles.appName}>MessageAI</Text>
+        <Text style={styles.appName}>Babble</Text>
         
-        {/* Tagline */}
-        <Text style={styles.tagline}>
-          {t('splashTagline') || 'Real-time messaging platform'}
-        </Text>
+        {/* Multilingual Tagline */}
+        <View style={styles.multilingualContainer}>
+          <Text style={styles.taglineEnglish}>Now everyone speaks your language</Text>
+          <Text style={styles.taglineOther}>الآن الجميع يتحدث لغتك</Text>
+          <Text style={styles.taglineOther}>이제 모두가 당신의 언어를 말합니다</Text>
+          <Text style={styles.taglineOther}>Теперь все говорят на вашем языке</Text>
+          <Text style={styles.taglineOther}>Jetzt spricht jeder Ihre Sprache</Text>
+        </View>
 
         {/* Value Proposition */}
         <View style={styles.features}>
-          <FeatureItem icon="🚀" text={t('splashFeature1') || 'Instant messaging across devices'} />
-          <FeatureItem icon="👥" text={t('splashFeature2') || 'Smart group conversations'} />
-          <FeatureItem icon="🔒" text={t('splashFeature3') || 'Secure & reliable messaging'} />
-          <FeatureItem icon="📱" text={t('splashFeature4') || 'Native mobile experience'} />
+          <FeatureItem icon="🚀" text="Instant messaging across devices" />
+          <FeatureItem icon="👥" text="Smart group conversations" />
+          <FeatureItem icon="🔒" text="Secure & reliable messaging" />
+          <FeatureItem icon="📱" text="Native mobile experience" />
         </View>
 
         {/* Target Persona */}
         <Text style={styles.persona}>
-          {t('splashPersona') || 'Built for teams and individuals who need\nreliable, real-time communication'}
+          Built for teams and individuals who need{'\n'}reliable, real-time communication
         </Text>
 
         {/* Loading indicator */}
         <View style={styles.loading}>
-          <Text style={styles.loadingText}>{t('loading') || 'Loading...'}</Text>
+          <Text style={styles.loadingText}>Loading...</Text>
         </View>
       </Animated.View>
     </View>
@@ -110,7 +112,7 @@ function FeatureItem({ icon, text }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#DEB887', // Lighter desert sand background
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -137,16 +139,28 @@ const styles = StyleSheet.create({
   appName: {
     fontSize: 36,
     fontWeight: 'bold',
-    color: 'white',
+    color: '#8B4513', // Saddle brown for better contrast on desert background
     marginBottom: 8,
     textAlign: 'center',
   },
-  tagline: {
-    fontSize: 18,
-    color: 'rgba(255, 255, 255, 0.9)',
+  multilingualContainer: {
     marginBottom: 40,
+    alignItems: 'center',
+  },
+  taglineEnglish: {
+    fontSize: 18,
+    color: '#8B4513', // Saddle brown for main tagline
     textAlign: 'center',
-    fontWeight: '500',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  taglineOther: {
+    fontSize: 14,
+    color: '#A0522D', // Desert brown for other languages
+    textAlign: 'center',
+    fontWeight: '400',
+    marginBottom: 4,
+    opacity: 0.85,
   },
   features: {
     alignSelf: 'stretch',
@@ -164,12 +178,12 @@ const styles = StyleSheet.create({
   },
   featureText: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.9)',
+    color: '#8B4513', // Desert brown for feature text
     flex: 1,
   },
   persona: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: '#A0522D', // Desert brown for persona text
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: 40,
@@ -179,7 +193,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   loadingText: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: '#A0522D', // Desert brown for loading text
     fontSize: 14,
   },
 });
